@@ -83,6 +83,17 @@ class EdgeTTSProvider(TTSProvider):
         except Exception as e:
             raise ProviderError(self.name, f"Synthesis failed: {e}") from e
 
+    async def warmup(self) -> None:
+        """Pre-initialize DNS/SSL caching for faster first real request."""
+        try:
+            communicate = edge_tts.Communicate("ok", VOICES["en"])
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    break  # Got first audio chunk, connection is warm
+            logger.debug("EdgeTTS: connection warmed up")
+        except Exception:
+            logger.debug("EdgeTTS: warmup failed (non-critical)")
+
     async def is_available(self) -> bool:
         """Edge TTS is always available (no API key needed)."""
         return True

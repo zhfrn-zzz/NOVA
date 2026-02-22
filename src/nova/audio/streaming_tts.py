@@ -13,6 +13,7 @@ import asyncio
 import logging
 import re
 import time
+from collections.abc import AsyncIterator
 
 from nova.audio.playback import play_audio
 
@@ -212,6 +213,95 @@ class StreamingTTSPlayer:
                 exc_info=True,
             )
             return 0.0
+
+    async def stream_from_llm(
+        self,
+        sentence_stream: AsyncIterator[str],
+        tts_router,
+        language: str = "auto",
+    ) -> tuple[str, float]:
+        """Stream sentences from LLM directly to TTS with overlapped playback.
+
+        Unlike synthesize_and_play() which takes full text, this method
+        accepts an async iterator of sentences from LLM streaming.
+        Each sentence is synthesized and played as it arrives, so audio
+        starts playing before the full LLM response is complete.
+
+        Args:
+            sentence_stream: Async iterator yielding complete sentences
+                from the LLM streaming response.
+            tts_router: The TTS ProviderRouter instance.
+            language: Language code ("id", "en", "auto").
+
+        Returns:
+            Tuple of (full response text, total time in seconds).
+        """
+        from nova.providers.tts.edge_tts_provider import detect_language
+
+        tts_start = time.perf_counter()
+        audio_queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=2)
+        all_sentences: list[str] = []
+        first_audio_time: float | None = None
+        detected_lang = language
+
+        async def producer() -> None:
+            nonlocal first_audio_time, detected_lang
+            i = 0
+            try:
+                async for sentence in sentence_stream:
+                    all_sentences.append(sentence)
+
+                    # Auto-detect language from the first sentence
+                    if detected_lang == "auto" and i == 0:
+                        detected_lang = detect_language(sentence)
+                        logger.debug(
+                            "LLM→TTS stream: detected language=%s from %r",
+                            detected_lang, sentence[:40],
+                        )
+
+                    try:
+                        audio = await tts_router.execute(
+                            "synthesize", sentence, detected_lang,
+                        )
+                        if i == 0 and first_audio_time is None:
+                            first_audio_time = time.perf_counter() - tts_start
+                        await audio_queue.put(audio)
+                    except Exception:
+                        logger.warning(
+                            "LLM→TTS stream: synthesis failed for sentence %d: %r",
+                            i, sentence[:50], exc_info=True,
+                        )
+                    i += 1
+            finally:
+                await audio_queue.put(None)
+
+        async def consumer() -> None:
+            while True:
+                audio = await audio_queue.get()
+                if audio is None:
+                    break
+                try:
+                    await play_audio(audio)
+                except Exception:
+                    logger.warning(
+                        "LLM→TTS stream: playback error", exc_info=True,
+                    )
+
+        await asyncio.gather(producer(), consumer())
+
+        total_time = time.perf_counter() - tts_start
+        full_text = " ".join(all_sentences)
+
+        logger.info(
+            "LLM→TTS stream complete: %.2fs total, "
+            "time-to-first-audio: %.2fs, %d sentences, %d chars",
+            total_time,
+            first_audio_time or total_time,
+            len(all_sentences),
+            len(full_text),
+        )
+
+        return full_text, total_time
 
 
 if __name__ == "__main__":

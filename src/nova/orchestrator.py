@@ -1,6 +1,15 @@
-"""Core pipeline orchestrator — coordinates STT, LLM, TTS, and context."""
+"""Core pipeline orchestrator — coordinates STT, LLM, TTS, and context.
 
+Supports two response paths:
+- Streaming: LLM streams sentences → TTS synthesizes each immediately → play.
+  Used for conversational queries. Lowest time-to-first-audio.
+- Tool: LLM generates full response with function calling → TTS streams.
+  Used when the query likely needs tools (time, volume, search, etc.).
+"""
+
+import asyncio
 import logging
+import re
 import shutil
 import time
 
@@ -17,6 +26,32 @@ from nova.providers.tts.edge_tts_provider import EdgeTTSProvider, detect_languag
 from nova.tools.registry import get_tool_declarations
 
 logger = logging.getLogger(__name__)
+
+# Keywords that indicate the query likely needs tool/function calling.
+# When detected, the orchestrator uses the non-streaming tool path.
+_TOOL_KEYWORDS = {
+    # Time/date
+    "jam", "waktu", "time", "tanggal", "date",
+    # System control
+    "volume", "mute", "unmute", "screenshot", "timer",
+    "shutdown", "restart", "lock", "sleep", "hibernate",
+    # App control
+    "buka", "tutup",
+    # System info
+    "baterai", "battery", "ram", "storage", "disk", "uptime",
+    # Notes & reminders
+    "catat", "catatan", "notes", "ingatkan", "reminder",
+    # Display & network
+    "brightness", "kecerahan", "wifi",
+    # Web search
+    "cari", "search", "google",
+    # Memory
+    "ingat", "remember", "lupakan", "forget",
+    # Media
+    "play", "pause", "next", "previous",
+    # Dictation
+    "ketik", "dictate",
+}
 
 
 class Orchestrator:
@@ -65,6 +100,9 @@ class Orchestrator:
         # Interaction counter for logging
         self._interaction_count = 0
 
+        # TTS warmup state
+        self._tts_warmed_up = False
+
         logger.info(
             "Orchestrator initialized — LLM: %s | TTS: %s | STT: %s",
             [p.name for p in llm_providers],
@@ -78,6 +116,80 @@ class Orchestrator:
             from nova.audio.capture import AudioCapture
             self._audio_capture = AudioCapture()
         return self._audio_capture
+
+    async def _warmup_tts(self) -> None:
+        """Pre-initialize Edge TTS connection for faster first request."""
+        if self._tts_warmed_up:
+            return
+        try:
+            provider = self._tts_router.providers[0]
+            if hasattr(provider, "warmup"):
+                await provider.warmup()
+            self._tts_warmed_up = True
+        except Exception:
+            logger.debug("TTS warmup failed (non-critical)")
+
+    def _likely_needs_tools(self, text: str) -> bool:
+        """Heuristic: does this query likely need tool/function calls?
+
+        Checks for keywords associated with NOVA's tools (time, volume,
+        search, etc.). Errs toward False — conversational queries get
+        the faster streaming path; missed tool queries still work via
+        the model's text response (just without tool results).
+        """
+        words = set(re.sub(r"[^\w\s]", "", text.lower()).split())
+        return bool(words & _TOOL_KEYWORDS)
+
+    async def _respond_streaming(
+        self, user_input: str,
+    ) -> tuple[str, float] | None:
+        """Streaming path: LLM stream → TTS stream.
+
+        Returns (response_text, total_time) or None if streaming fails.
+        Falls back gracefully so the caller can retry with the tool path.
+        """
+        context = self._context.get_context()
+        provider = self._llm_router.providers[0]
+
+        try:
+            start = time.perf_counter()
+            sentence_stream = provider.generate_stream(user_input, context)
+            full_text, tts_time = await self._streaming_tts.stream_from_llm(
+                sentence_stream, self._tts_router, language="auto",
+            )
+            total = time.perf_counter() - start
+
+            if not full_text:
+                return None
+
+            logger.info(
+                "Streaming response: %.2fs total (TTS: %.2fs), %d chars",
+                total, tts_time, len(full_text),
+            )
+            return full_text, total
+        except Exception:
+            logger.warning("Streaming path failed, will fall back", exc_info=True)
+            return None
+
+    async def _respond_with_tools(
+        self, user_input: str,
+    ) -> tuple[str, float]:
+        """Standard tool path: LLM with function calling → streaming TTS.
+
+        Returns (response_text, total_time). Raises on total failure.
+        """
+        start = time.perf_counter()
+
+        response, llm_time = await self.process_text(user_input)
+        language = detect_language(response)
+        tts_time = await self.speak(response, language=language)
+        total = time.perf_counter() - start
+
+        logger.info(
+            "Tool response: %.2fs total (LLM: %.2fs, TTS: %.2fs), %d chars",
+            total, llm_time, tts_time, len(response),
+        )
+        return response, total
 
     async def process_text(self, text: str) -> tuple[str, float]:
         """Send text to the LLM and return the response with timing.
@@ -130,7 +242,11 @@ class Orchestrator:
     async def handle_interaction(self, user_input: str) -> str:
         """Process a full text interaction: LLM response + TTS playback.
 
-        Handles all failure modes gracefully so NOVA never crashes.
+        Routes between two paths:
+        - Streaming: LLM streams sentences → TTS plays each immediately.
+          Used for conversational queries. Lowest time-to-first-audio.
+        - Tool: Full LLM response with function calling → streaming TTS.
+          Used when the query likely needs tools.
 
         Args:
             user_input: The user's text input.
@@ -141,32 +257,46 @@ class Orchestrator:
         self._interaction_count += 1
         interaction_id = self._interaction_count
 
+        # Warmup TTS on first interaction (non-blocking)
+        if not self._tts_warmed_up:
+            asyncio.ensure_future(self._warmup_tts())
+
+        use_tools = self._likely_needs_tools(user_input)
+
         try:
-            # Get LLM response
-            response, llm_time = await self.process_text(user_input)
+            if use_tools:
+                logger.info(
+                    "[#%d] Tool path (keywords detected)", interaction_id,
+                )
+                response, total_time = await self._respond_with_tools(user_input)
+            else:
+                # Try streaming first; fall back to tools on failure
+                result = await self._respond_streaming(user_input)
+                if result is not None:
+                    response, total_time = result
+                    logger.info(
+                        "[#%d] Streaming path succeeded", interaction_id,
+                    )
+                else:
+                    logger.info(
+                        "[#%d] Streaming failed, falling back to tool path",
+                        interaction_id,
+                    )
+                    response, total_time = await self._respond_with_tools(user_input)
+
         except AllProvidersFailedError:
-            logger.error("[Interaction #%d] All LLM providers failed", interaction_id)
+            logger.error("[#%d] All LLM providers failed", interaction_id)
             return "Semua layanan sedang sibuk, coba lagi sebentar."
         except Exception:
-            logger.exception("[Interaction #%d] Unexpected LLM error", interaction_id)
+            logger.exception("[#%d] Unexpected error", interaction_id)
             return "Terjadi kesalahan, tapi saya masih berjalan."
-
-        # Detect language from the response for TTS
-        language = detect_language(response)
-
-        # Speak the response (non-blocking failure — prints only if TTS fails)
-        tts_time = await self.speak(response, language=language)
 
         # Store in context
         self._context.add_exchange(user_input, response)
 
-        # Per-interaction summary log
         logger.info(
-            "Interaction #%d complete\n"
-            "  LLM: %.2fs | TTS: %.2fs | Total: %.2fs\n"
-            "  Input: %r | Response: %d chars",
-            interaction_id,
-            llm_time, tts_time, llm_time + tts_time,
+            "Interaction #%d complete — %.2fs | %r → %d chars",
+            interaction_id, total_time,
             user_input[:80], len(response),
         )
 
@@ -175,11 +305,8 @@ class Orchestrator:
     async def handle_voice_interaction(self) -> str | None:
         """Process a full voice interaction: capture -> STT -> LLM -> TTS -> playback.
 
-        Handles all failure modes:
-        - Audio device not found → returns special sentinel
-        - No speech detected → returns None
-        - STT failure → returns sentinel for text fallback
-        - LLM/TTS failures → graceful error messages
+        After STT, routes through the same dual-path as handle_interaction:
+        streaming for conversational queries, tool path for tool queries.
 
         Returns:
             The assistant's response text, None if no speech, or error string.
@@ -188,19 +315,22 @@ class Orchestrator:
         interaction_id = self._interaction_count
         total_start = time.perf_counter()
 
+        # Warmup TTS on first interaction (non-blocking)
+        if not self._tts_warmed_up:
+            asyncio.ensure_future(self._warmup_tts())
+
         # 1. Capture audio from microphone
         try:
             audio_capture = self._get_audio_capture()
             wav_bytes = await audio_capture.capture()
         except OSError as e:
-            logger.error("[Interaction #%d] Audio device error: %s", interaction_id, e)
+            logger.error("[#%d] Audio device error: %s", interaction_id, e)
             return "__AUDIO_DEVICE_ERROR__"
         except Exception as e:
-            logger.exception("[Interaction #%d] Audio capture error: %s", interaction_id, e)
+            logger.exception("[#%d] Audio capture error: %s", interaction_id, e)
             return "__AUDIO_DEVICE_ERROR__"
 
         # Check for empty audio (no speech detected)
-        # WAV header is 44 bytes; anything near that size means no real audio
         if len(wav_bytes) <= 44:
             return None
 
@@ -210,10 +340,10 @@ class Orchestrator:
             transcript = await self._stt_router.execute("transcribe", wav_bytes)
             stt_time = time.perf_counter() - stt_start
         except AllProvidersFailedError:
-            logger.error("[Interaction #%d] All STT providers failed", interaction_id)
+            logger.error("[#%d] All STT providers failed", interaction_id)
             return "__STT_FAILED__"
         except Exception:
-            logger.exception("[Interaction #%d] STT error", interaction_id)
+            logger.exception("[#%d] STT error", interaction_id)
             return "__STT_FAILED__"
 
         if not transcript or not transcript.strip():
@@ -221,32 +351,32 @@ class Orchestrator:
 
         transcript = transcript.strip()
 
-        # 3. LLM: generate response
+        # 3. LLM → TTS: route through streaming or tool path
+        use_tools = self._likely_needs_tools(transcript)
+
         try:
-            response, llm_time = await self.process_text(transcript)
+            if use_tools:
+                response, _ = await self._respond_with_tools(transcript)
+            else:
+                result = await self._respond_streaming(transcript)
+                if result is not None:
+                    response, _ = result
+                else:
+                    response, _ = await self._respond_with_tools(transcript)
         except AllProvidersFailedError:
-            logger.error("[Interaction #%d] All LLM providers failed", interaction_id)
+            logger.error("[#%d] All LLM providers failed", interaction_id)
             return "Semua layanan sedang sibuk, coba lagi sebentar."
         except Exception:
-            logger.exception("[Interaction #%d] Unexpected LLM error", interaction_id)
+            logger.exception("[#%d] Unexpected LLM/TTS error", interaction_id)
             return "Terjadi kesalahan, tapi saya masih berjalan."
 
-        # 4. Detect language for TTS
-        language = detect_language(response)
-
-        # 5. TTS: synthesize and play
-        tts_time = await self.speak(response, language=language)
-
-        # 6. Store in context
+        # 4. Store in context
         self._context.add_exchange(transcript, response)
 
         total_time = time.perf_counter() - total_start
         logger.info(
-            "Voice interaction #%d complete\n"
-            "  STT: %.2fs | LLM: %.2fs | TTS: %.2fs | Total: %.2fs\n"
-            "  Input: %r | Response: %d chars",
-            interaction_id,
-            stt_time, llm_time, tts_time, total_time,
+            "Voice #%d complete — STT: %.2fs | Total: %.2fs | %r → %d chars",
+            interaction_id, stt_time, total_time,
             transcript[:80], len(response),
         )
 

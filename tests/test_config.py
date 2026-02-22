@@ -26,7 +26,7 @@ class TestNovaConfigDefaults:
         assert config.sample_rate == 16000
         assert config.channels == 1
         assert config.silence_threshold == 0.03
-        assert config.silence_duration == 1.5
+        assert config.silence_duration == 1.0
         assert config.max_recording_seconds == 15.0
         assert config.stt_timeout == 10.0
         assert config.llm_timeout == 15.0

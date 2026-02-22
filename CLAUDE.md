@@ -150,6 +150,7 @@ nova/
 - [x] Task 15.5: Persistent user memory — remember_fact/recall_facts (Phase 2)
 - [x] Task 16: Web search tool (Phase 2)
 - [x] Task 17: Streaming TTS — split-and-stream for reduced latency (Phase 2)
+- [x] Task 17.5: LLM+TTS streaming — stream LLM sentences directly to TTS for <1.5s TTFA (Phase 2)
 - [ ] Task 18: Systemd service + setup script (Phase 2)
 - [x] Task 19: System info tools — battery, RAM, storage, IP, uptime (Phase 2)
 - [x] Task 20: Quick notes — add/read/clear notes (Phase 2)

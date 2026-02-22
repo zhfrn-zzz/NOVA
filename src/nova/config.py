@@ -22,7 +22,7 @@ class NovaConfig(BaseSettings):
     sample_rate: int = 16000
     channels: int = 1
     silence_threshold: float = 0.03
-    silence_duration: float = 1.5
+    silence_duration: float = 1.0
     max_recording_seconds: float = 15.0
 
     # Provider priorities

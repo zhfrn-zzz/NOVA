@@ -1,6 +1,7 @@
 """Gemini LLM provider — primary LLM using Google GenAI SDK with function calling."""
 
 import logging
+import re
 from collections.abc import AsyncIterator
 
 from google import genai
@@ -69,6 +70,55 @@ _MODELS = ["gemini-2.5-flash", "gemini-2.0-flash-lite"]
 
 # Maximum number of function-call round-trips to prevent infinite loops
 _MAX_TOOL_CALLS = 3
+
+# --- Sentence boundary detection for streaming ---
+
+# Abbreviations that should NOT be treated as sentence endings
+_STREAM_ABBREVIATIONS = {
+    "dr", "mr", "mrs", "ms", "prof", "jr", "sr", "vs", "etc", "inc", "ltd",
+    "dll", "dsb", "dkk", "spt", "yth", "no", "vol", "hal", "tel", "fax",
+}
+
+# Pattern: sentence-ending punctuation followed by whitespace
+_SENTENCE_BREAK_RE = re.compile(r"[.!?]\s")
+
+
+def _extract_sentence(buffer: str) -> tuple[str | None, str]:
+    """Extract the first complete sentence from a token buffer.
+
+    Returns (sentence, remaining_buffer) if a sentence boundary is found,
+    or (None, buffer) if no complete sentence yet.
+    """
+    # Check for newline boundary
+    nl_idx = buffer.find("\n")
+    if nl_idx > 0:
+        sentence = buffer[:nl_idx].strip()
+        remaining = buffer[nl_idx + 1 :]
+        if sentence and len(sentence) >= 8:
+            return sentence, remaining
+
+    # Check for punctuation + whitespace boundaries
+    for match in _SENTENCE_BREAK_RE.finditer(buffer):
+        end = match.start() + 1  # Include the punctuation character
+        candidate = buffer[:end].strip()
+        remaining = buffer[match.end() :]
+
+        if not candidate or len(candidate) < 8:
+            continue
+
+        # Skip abbreviations (e.g. "Dr. ")
+        if candidate[-1] == ".":
+            stripped = candidate[:-1].strip()
+            word_before = stripped.rsplit(None, 1)[-1].lower() if stripped else ""
+            if word_before in _STREAM_ABBREVIATIONS:
+                continue
+            # Skip decimal numbers (e.g. "3.14 ")
+            if len(candidate) >= 2 and candidate[-2].isdigit():
+                continue
+
+        return candidate, remaining
+
+    return None, buffer
 
 
 def _build_contents(
@@ -275,31 +325,50 @@ class GeminiProvider(LLMProvider):
     async def generate_stream(
         self, prompt: str, context: list[dict],
     ) -> AsyncIterator[str]:
-        """Stream a response token-by-token.
+        """Stream a response as complete sentences.
+
+        Buffers incoming tokens and yields each complete sentence as
+        soon as a sentence boundary is detected (. ! ? followed by
+        whitespace, or newline). This enables the TTS pipeline to start
+        speaking the first sentence before the full response is ready.
 
         Args:
             prompt: The user's current message.
             context: Prior exchanges.
 
         Yields:
-            Response text chunks as they arrive.
+            Complete sentences as they are detected in the token stream.
         """
         client = self._get_client()
         contents = _build_contents(prompt, context)
+        buffer = ""
 
         try:
-            async for chunk in client.aio.models.generate_content_stream(
+            stream = await client.aio.models.generate_content_stream(
                 model=self._model_name,
                 contents=contents,
                 config=self._get_config(),
-            ):
-                if chunk.text:
-                    yield chunk.text
+            )
+            async for chunk in stream:
+                if not chunk.text:
+                    continue
+                buffer += chunk.text
+
+                # Extract complete sentences from buffer
+                while True:
+                    sentence, buffer = _extract_sentence(buffer)
+                    if sentence is None:
+                        break
+                    yield sentence
 
         except (RateLimitError, ProviderTimeoutError, ProviderError):
             raise
         except Exception as e:
             self._handle_error(e)
+        finally:
+            # Yield any remaining text at end of stream
+            if buffer.strip():
+                yield buffer.strip()
 
     async def is_available(self) -> bool:
         """Check if the Gemini API key is configured and valid."""
