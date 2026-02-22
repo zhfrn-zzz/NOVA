@@ -23,6 +23,7 @@ dependencies = [
     "rich>=13.0",
     "pydantic-settings>=2.0",
     "pynput>=1.7",
+    "openwakeword>=0.6",
 ]
 
 [project.optional-dependencies]

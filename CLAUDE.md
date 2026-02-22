@@ -6,6 +6,8 @@ NOVA is a personal AI voice assistant that runs on extremely low-spec hardware (
 
 The pipeline: **Mic → Cloud STT → Cloud LLM → Cloud TTS → Speaker**
 
+Wake word detection uses [openwakeword](https://github.com/dscripka/openWakeWord) with a custom `hey_nova.onnx` model for always-listening activation. Falls back to keyboard hotkey (`Ctrl+Space`) if openwakeword is unavailable.
+
 ## Hardware Constraints (CRITICAL — read before every implementation decision)
 
 | Component | Spec | What this means |
@@ -74,7 +76,8 @@ nova/
 │       │   ├── __init__.py
 │       │   ├── capture.py        # Mic input + VAD
 │       │   ├── playback.py       # Speaker output (mpv)
-│       │   └── wake_word.py      # Porcupine hotword (Phase 2)
+│       │   ├── wake_word.py      # Hotkey fallback detector (Ctrl+Space)
+│       │   └── wake_word_oww.py  # OpenWakeWord detector (default)
 │       ├── providers/
 │       │   ├── __init__.py
 │       │   ├── base.py           # Abstract: STTProvider, LLMProvider, TTSProvider
@@ -131,7 +134,8 @@ nova/
 - [x] Task 10: Fallback providers + router wiring
 - [x] Task 11: Error handling & resilience
 - [x] Task 12: Logging & monitoring
-- [x] Task 13: Wake word detection (Phase 2)
+- [x] Task 13: Wake word detection — hotkey fallback (Phase 2)
+- [x] Task 13.5: OpenWakeWord integration — always-listening with hey_nova.onnx
 - [x] Task 14: System control tools (Phase 2)
 - [ ] Task 15: Response caching (Phase 2)
 - [ ] Task 16: Web search tool (Phase 2)

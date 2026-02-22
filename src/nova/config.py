@@ -41,6 +41,9 @@ class NovaConfig(BaseSettings):
     stt_language: str = "id"  # Hint for Whisper ("id", "en", or "auto")
 
     # Wake word / hotkey
+    wake_word_model_path: str = "models/hey_nova.onnx"
+    wake_word_threshold: float = 0.5
+    wake_word_vad_threshold: float = 0.5
     wake_word_sensitivity: float = 0.5
     wake_word_hotkey: str = "<ctrl>+<space>"
 

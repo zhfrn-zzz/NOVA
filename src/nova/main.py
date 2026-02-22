@@ -30,6 +30,11 @@ def _parse_args() -> argparse.Namespace:
         help="Push-to-talk mode (press Enter to speak, as in Phase 1)",
     )
     parser.add_argument(
+        "--hotkey",
+        action="store_true",
+        help="Use keyboard hotkey (Ctrl+Space) instead of wake word detection",
+    )
+    parser.add_argument(
         "--verbose", "-v",
         action="store_true",
         help="Enable debug logging",
@@ -60,6 +65,26 @@ async def _run_check() -> None:
         else:
             console.print(f"  [red]❌[/] {component}: {status}")
             all_ok = False
+
+    # Check wake word model
+    config = get_config()
+    try:
+        import os
+
+        from nova.audio.wake_word_oww import OpenWakeWordDetector  # noqa: F401
+
+        model_exists = os.path.isfile(config.wake_word_model_path)
+        if model_exists:
+            console.print(
+                f"  [green]✅[/] wake_word: {config.wake_word_model_path} found"
+            )
+        else:
+            console.print(
+                f"  [red]❌[/] wake_word: {config.wake_word_model_path} not found"
+            )
+            all_ok = False
+    except ImportError:
+        console.print("  [yellow]⚠️[/] wake_word: openwakeword not installed (hotkey fallback)")
 
     console.print()
     if all_ok:
@@ -182,24 +207,46 @@ async def _voice_mode(orchestrator) -> None:
             console.print("[red]Terjadi kesalahan, tapi saya masih berjalan.[/]\n")
 
 
-async def _wake_word_mode(orchestrator) -> None:
-    """Run the wake-word (hotkey) continuous listening mode.
+async def _wake_word_mode(orchestrator, force_hotkey: bool = False) -> None:
+    """Run the wake-word continuous listening mode.
 
-    Listens for the configured hotkey, plays an activation beep,
-    then captures audio and processes the voice interaction.
+    By default uses OpenWakeWord for always-listening detection.
+    Falls back to hotkey mode if openwakeword fails to load or
+    if force_hotkey is True.
     """
-    from nova.audio.wake_word import HotkeyWakeWordDetector
-
     config = get_config()
-    detector = HotkeyWakeWordDetector()
     loop = asyncio.get_event_loop()
-    detector.start(loop)
+    detector = None
+    mode_label = "wake word"
 
-    console.print(
-        f"[bold green]NOVA[/] ready (wake word mode). "
-        f"Press [bold]{config.wake_word_hotkey}[/] to activate, "
-        f"or type 'exit' to quit.\n"
-    )
+    if not force_hotkey:
+        try:
+            from nova.audio.wake_word_oww import OpenWakeWordDetector
+
+            detector = OpenWakeWordDetector()
+            detector.start(loop)
+            mode_label = f"wake word ({config.wake_word_model_path})"
+            console.print(
+                f"[bold green]NOVA[/] ready ({mode_label}). "
+                f"Say the wake word to activate, or type 'exit' to quit.\n"
+            )
+        except Exception as e:
+            logging.getLogger(__name__).warning(
+                "OpenWakeWord failed to load (%s), falling back to hotkey", e,
+            )
+            detector = None
+
+    if detector is None:
+        from nova.audio.wake_word import HotkeyWakeWordDetector
+
+        detector = HotkeyWakeWordDetector()
+        detector.start(loop)
+        mode_label = f"hotkey ({config.wake_word_hotkey})"
+        console.print(
+            f"[bold green]NOVA[/] ready ({mode_label}). "
+            f"Press [bold]{config.wake_word_hotkey}[/] to activate, "
+            f"or type 'exit' to quit.\n"
+        )
 
     text_fallback = False
 
@@ -329,8 +376,11 @@ async def _async_main() -> None:
         await _text_mode(orchestrator)
     elif args.push_to_talk:
         await _voice_mode(orchestrator)
+    elif args.hotkey:
+        # Forced hotkey mode
+        await _wake_word_mode(orchestrator, force_hotkey=True)
     else:
-        # Default: wake word / hotkey mode
+        # Default: OpenWakeWord always-listening (hotkey fallback)
         await _wake_word_mode(orchestrator)
 
     console.print("\n[bold green]Sampai jumpa![/] (Goodbye!)")
