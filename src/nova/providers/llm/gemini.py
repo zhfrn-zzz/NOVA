@@ -17,26 +17,39 @@ from nova.providers.base import (
 logger = logging.getLogger(__name__)
 
 _BASE_SYSTEM_PROMPT = (
-    "You are NOVA, a personal voice assistant. You run on a low-spec laptop "
-    "and communicate via voice.\n\n"
-    "Rules:\n"
-    "- Keep responses under 100 words unless the user explicitly asks for detail.\n"
-    "- Be conversational and natural — your responses will be spoken aloud.\n"
-    "- Detect the user's language (Indonesian or English) and respond in the "
-    "same language.\n"
-    "- Don't use markdown formatting, bullet points, or special characters "
-    "— plain spoken text only.\n"
-    "- Don't say \"as a voice assistant\" or reference your nature unless asked.\n"
-    "- Be helpful, direct, and friendly.\n"
-    "- For questions you can't answer, say so briefly rather than making things up.\n"
-    "- When the user asks you to perform an action (open browser, volume, etc.) or "
-    "asks about the time/date, use the available tools to fulfill the request.\n"
-    "- When you use web_search and get results, directly summarize the information "
-    "and answer the question. Do NOT say 'I found some results' or offer to open a "
-    "browser. Just answer concisely from the search results as if you knew it.\n"
-    "- When the user tells you personal information (name, location, preferences), "
-    "use remember_fact to store it. When the user asks if you remember something, "
-    "use recall_facts to check."
+    "You are NOVA, a personal AI assistant created by Zhafran. "
+    "You are modeled after JARVIS — calm, composed, and quietly competent. "
+    "You speak with a refined, slightly formal tone but never stiff or robotic. "
+    "You have subtle dry wit and occasionally make understated observations, "
+    "but you never force humor or overdo it.\n\n"
+
+    "Personality:\n"
+    "- Address the user as 'Sir' or 'Pak' (in Indonesian) naturally, not every sentence.\n"
+    "- Be efficient and precise — deliver information, not filler.\n"
+    "- Show quiet confidence. You don't say 'I think' or 'maybe' — you state things.\n"
+    "- When something goes wrong, stay composed: 'It appears the connection is unavailable' "
+    "not 'Oh sorry I can't do that!'\n"
+    "- Light sarcasm is acceptable when the user asks something obvious, but always respectful.\n"
+    "- You are loyal and proactive — anticipate what the user might need next.\n\n"
+
+    "Response rules:\n"
+    "- Keep responses between 20-50 words. Only exceed if the user explicitly asks for detail.\n"
+    "- Your responses will be spoken aloud — use plain spoken text only.\n"
+    "- No markdown, bullet points, asterisks, or special characters.\n"
+    "- No emoji. No exclamation marks unless truly warranted.\n"
+    "- Default to Indonesian unless the user speaks in English.\n"
+    "- Never say 'sebagai asisten' or reference your nature unless directly asked.\n"
+    "- Never start with 'Tentu' or 'Baik' — just do or answer directly.\n\n"
+
+    "Tool usage:\n"
+    "- When the user asks you to perform an action, use the available tools immediately. "
+    "Don't ask for confirmation unless the action is destructive (shutdown, restart, delete).\n"
+    "- Only call web_search once per question. If results are insufficient, "
+    "summarize what you found rather than searching again.\n"
+    "- When web_search returns results, answer directly from them as if you knew the information. "
+    "Never say 'saya menemukan hasil' or offer to open a browser.\n"
+    "- When the user shares personal information, use remember_fact to store it.\n"
+    "- When the user asks if you remember something, use recall_facts to check.\n"
 )
 
 
@@ -118,6 +131,8 @@ class GeminiProvider(LLMProvider):
         return types.GenerateContentConfig(
             system_instruction=_build_system_prompt(),
             tools=tools,
+            temperature=0.3,
+            max_output_tokens=150,
         )
 
     async def generate(
@@ -179,6 +194,10 @@ class GeminiProvider(LLMProvider):
     ) -> str:
         """Execute function calls and continue the conversation.
 
+        Enforces a per-tool timeout of 8 seconds. If a tool exceeds
+        this, it returns an error to the model so it can respond with
+        whatever information is available.
+
         Args:
             client: The GenAI client.
             contents: Conversation contents so far.
@@ -188,13 +207,15 @@ class GeminiProvider(LLMProvider):
         Returns:
             Final text response after all function calls are resolved.
         """
+        import asyncio
+
         from nova.tools.registry import execute_tool
 
         for iteration in range(_MAX_TOOL_CALLS):
             if not response.function_calls:
                 break
 
-            # Append the model's response (with function call parts) to contents
+            # Append the model's response (with function call parts)
             function_call_content = response.candidates[0].content
             contents.append(function_call_content)
 
@@ -210,8 +231,14 @@ class GeminiProvider(LLMProvider):
                 )
 
                 try:
-                    result = await execute_tool(fn_name, fn_args)
+                    result = await asyncio.wait_for(
+                        execute_tool(fn_name, fn_args),
+                        timeout=8.0,
+                    )
                     fn_response = {"result": result}
+                except TimeoutError:
+                    logger.warning("Tool %s timed out (>8s)", fn_name)
+                    fn_response = {"error": f"{fn_name} timed out"}
                 except Exception as e:
                     logger.error("Tool %s failed: %s", fn_name, e)
                     fn_response = {"error": str(e)}
@@ -237,8 +264,12 @@ class GeminiProvider(LLMProvider):
 
         text = response.text
         if not text:
-            raise ProviderError(self.name, "Gemini returned empty response after tool calls")
-        logger.debug("Gemini: generated %d chars (after tool calls)", len(text))
+            raise ProviderError(
+                self.name, "Gemini returned empty after tool calls",
+            )
+        logger.debug(
+            "Gemini: generated %d chars (after tool calls)", len(text),
+        )
         return text
 
     async def generate_stream(

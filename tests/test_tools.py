@@ -1,7 +1,7 @@
 """Tests for NOVA tools: time_date, system_control, memory, and registry."""
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -411,9 +411,6 @@ class TestDictationTool:
 
         with patch("nova.tools.dictation.pyautogui", create=True) as mock_pyautogui:
             mock_pyautogui.write = MagicMock()
-            # Patch the import inside the function
-            import nova.tools.dictation as dictation_mod
-
             with patch.dict("sys.modules", {"pyautogui": mock_pyautogui}):
                 result = await dictate("hello world")
                 assert "berhasil" in result.lower() or "hello" in result.lower()

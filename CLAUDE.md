@@ -76,6 +76,7 @@ nova/
 │       │   ├── __init__.py
 │       │   ├── capture.py        # Mic input + VAD
 │       │   ├── playback.py       # Speaker output (mpv)
+│       │   ├── streaming_tts.py  # Split-and-stream TTS for low latency
 │       │   ├── wake_word.py      # Hotkey fallback detector (Ctrl+Space)
 │       │   └── wake_word_oww.py  # OpenWakeWord detector (default)
 │       ├── providers/
@@ -148,7 +149,7 @@ nova/
 - [ ] Task 15: Response caching (Phase 2)
 - [x] Task 15.5: Persistent user memory — remember_fact/recall_facts (Phase 2)
 - [x] Task 16: Web search tool (Phase 2)
-- [ ] Task 17: Audio streaming TTS (Phase 2)
+- [x] Task 17: Streaming TTS — split-and-stream for reduced latency (Phase 2)
 - [ ] Task 18: Systemd service + setup script (Phase 2)
 - [x] Task 19: System info tools — battery, RAM, storage, IP, uptime (Phase 2)
 - [x] Task 20: Quick notes — add/read/clear notes (Phase 2)

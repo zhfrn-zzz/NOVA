@@ -4,7 +4,7 @@ import logging
 import shutil
 import time
 
-from nova.audio.playback import play_audio
+from nova.audio.streaming_tts import StreamingTTSPlayer
 from nova.config import get_config
 from nova.memory.context import ConversationContext
 from nova.providers.base import AllProvidersFailedError
@@ -59,6 +59,9 @@ class Orchestrator:
         # Tool declarations for function calling
         self._tools = get_tool_declarations()
 
+        # Streaming TTS player for reduced latency
+        self._streaming_tts = StreamingTTSPlayer()
+
         # Interaction counter for logging
         self._interaction_count = 0
 
@@ -99,21 +102,23 @@ class Orchestrator:
     async def speak(self, text: str, language: str | None = None) -> float:
         """Convert text to speech and play through speakers.
 
+        Uses streaming TTS: splits into sentences, synthesizes and plays
+        the first sentence immediately while synthesizing the rest in
+        the background for gapless playback.
+
         Args:
             text: Text to speak aloud.
             language: Language code, or None to auto-detect.
 
         Returns:
-            TTS synthesis time in seconds (0.0 on failure).
+            TTS time in seconds (0.0 on failure).
         """
         lang = language or self._default_language
 
-        start = time.perf_counter()
         try:
-            audio_bytes = await self._tts_router.execute("synthesize", text, lang)
-            tts_elapsed = time.perf_counter() - start
-            logger.info("TTS synthesized in %.2fs (%d bytes)", tts_elapsed, len(audio_bytes))
-            await play_audio(audio_bytes)
+            tts_elapsed = await self._streaming_tts.synthesize_and_play(
+                text, self._tts_router, language=lang,
+            )
             return tts_elapsed
         except AllProvidersFailedError:
             logger.error("All TTS providers failed — response printed only")

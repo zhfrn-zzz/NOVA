@@ -11,15 +11,16 @@ from ddgs import DDGS
 
 logger = logging.getLogger(__name__)
 
-_MAX_RESULTS = 3
+_MAX_RESULTS = 2
+_SEARCH_TIMEOUT = 6.0  # Hard timeout for the entire search operation
 
 
 async def web_search(query: str) -> str:
     """Search the web using DuckDuckGo and return a concise summary.
 
     Runs the synchronous DDGS client in a thread executor to avoid
-    blocking the async event loop.  If the first attempt returns no
-    results, retries once with a broadened query.
+    blocking the async event loop. Enforces a hard timeout to prevent
+    slow searches from stalling the pipeline.
 
     Args:
         query: The search query string.
@@ -30,13 +31,13 @@ async def web_search(query: str) -> str:
     logger.info("Web search: %r", query)
 
     try:
-        results = await asyncio.to_thread(_search_sync, query)
-
-        # Retry once with a broader query if no results
-        if not results:
-            retry_query = f"{query} info"
-            logger.info("Web search retry with: %r", retry_query)
-            results = await asyncio.to_thread(_search_sync, retry_query)
+        results = await asyncio.wait_for(
+            asyncio.to_thread(_search_sync, query),
+            timeout=_SEARCH_TIMEOUT,
+        )
+    except TimeoutError:
+        logger.warning("Web search timed out after %.1fs", _SEARCH_TIMEOUT)
+        return "Hasil pencarian tidak tersedia saat ini."
     except Exception as e:
         logger.error("Web search failed: %s", e)
         return f"Pencarian gagal: {e}"
@@ -65,8 +66,8 @@ def _search_sync(query: str) -> list[dict]:
     Returns:
         List of result dicts with 'title', 'href', 'body' keys.
     """
-    with DDGS() as ddgs:
-        return list(ddgs.text(query, max_results=_MAX_RESULTS))
+    with DDGS(timeout=5) as ddgs:
+        return list(ddgs.text(query, max_results=_MAX_RESULTS, backend="lite"))
 
 
 if __name__ == "__main__":
