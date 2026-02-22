@@ -80,6 +80,63 @@ async def _text_mode(orchestrator: Orchestrator) -> None:
             console.print("[red]An error occurred. Please try again.[/]\n")
 
 
+async def _voice_mode(orchestrator: Orchestrator) -> None:
+    """Run the push-to-talk voice interactive loop."""
+    console.print(
+        "[bold green]NOVA[/] ready (voice mode). "
+        "Press [bold]Enter[/] to speak, type 'exit' to quit.\n"
+    )
+
+    loop = asyncio.get_event_loop()
+
+    while True:
+        try:
+            user_input = await loop.run_in_executor(
+                None, lambda: input("Press Enter to speak (or type 'exit'): "),
+            )
+        except EOFError:
+            break
+
+        # Allow typing exit/quit/bye to leave
+        stripped = user_input.strip().lower()
+        if stripped in ("exit", "quit", "bye"):
+            break
+
+        # If they typed actual text instead of just pressing Enter, use text mode for it
+        if user_input.strip():
+            try:
+                response = await orchestrator.handle_interaction(user_input.strip())
+                console.print(f"[bold cyan]Nova:[/] {response}\n")
+            except KeyboardInterrupt:
+                break
+            except Exception:
+                logging.getLogger(__name__).exception("Error during interaction")
+                console.print("[red]An error occurred. Please try again.[/]\n")
+            continue
+
+        # Push-to-talk: Enter was pressed with no text
+        console.print("[bold yellow]Listening...[/]")
+
+        try:
+            response = await orchestrator.handle_voice_interaction()
+
+            if response is None:
+                console.print("[dim]No speech detected. Try again.[/]\n")
+                continue
+
+            # Print what was heard and the response
+            transcript = orchestrator.last_transcript
+            if transcript:
+                console.print(f"[bold white]You:[/] {transcript}")
+            console.print(f"[bold cyan]Nova:[/] {response}\n")
+
+        except KeyboardInterrupt:
+            console.print("\n[dim]Cancelled.[/]\n")
+        except Exception:
+            logging.getLogger(__name__).exception("Error during voice interaction")
+            console.print("[red]An error occurred. Please try again.[/]\n")
+
+
 async def _async_main() -> None:
     """Async entry point."""
     args = _parse_args()
@@ -97,8 +154,7 @@ async def _async_main() -> None:
     if args.text_only:
         await _text_mode(orchestrator)
     else:
-        # Default to text mode for now; voice mode added in Task 9
-        await _text_mode(orchestrator)
+        await _voice_mode(orchestrator)
 
     console.print("\n[bold green]Sampai jumpa![/] (Goodbye!)")
 

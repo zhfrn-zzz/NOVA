@@ -127,7 +127,7 @@ nova/
 - [x] Task 6: Groq Whisper STT provider (primary STT)
 - [x] Task 7: Audio capture with VAD
 - [x] Task 8: Text-only pipeline integration ← **Integration Milestone**
-- [ ] Task 9: Full voice pipeline ← **MVP Milestone**
+- [x] Task 9: Full voice pipeline ← **MVP Milestone**
 - [ ] Task 10: Fallback providers + router wiring
 - [ ] Task 11: Error handling & resilience
 - [ ] Task 12: Logging & monitoring
