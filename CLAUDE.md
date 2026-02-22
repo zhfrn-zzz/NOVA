@@ -125,8 +125,8 @@ nova/
 - [x] Task 4: Edge TTS provider (primary TTS)
 - [x] Task 5: Gemini LLM provider (primary LLM)
 - [x] Task 6: Groq Whisper STT provider (primary STT)
-- [ ] Task 7: Audio capture with VAD
-- [ ] Task 8: Text-only pipeline integration ← **Integration Milestone**
+- [x] Task 7: Audio capture with VAD
+- [x] Task 8: Text-only pipeline integration ← **Integration Milestone**
 - [ ] Task 9: Full voice pipeline ← **MVP Milestone**
 - [ ] Task 10: Fallback providers + router wiring
 - [ ] Task 11: Error handling & resilience

@@ -4,6 +4,21 @@ import pytest
 
 from nova.config import NovaConfig
 
+# Env vars that NovaConfig reads for API keys
+_API_KEY_VARS = [
+    "NOVA_GEMINI_API_KEY",
+    "NOVA_GROQ_API_KEY",
+    "NOVA_CLOUDFLARE_ACCOUNT_ID",
+    "NOVA_CLOUDFLARE_API_TOKEN",
+]
+
+
+@pytest.fixture()
+def _clean_env(monkeypatch):
+    """Clear all NOVA API key env vars so tests get true defaults."""
+    for var in _API_KEY_VARS:
+        monkeypatch.delenv(var, raising=False)
+
 
 class TestNovaConfigDefaults:
     def test_default_values(self):
@@ -27,8 +42,9 @@ class TestNovaConfigDefaults:
         assert config.llm_providers == ["gemini", "groq", "cloudflare"]
         assert config.tts_providers == ["edge", "cloudflare"]
 
+    @pytest.mark.usefixtures("_clean_env")
     def test_default_api_keys_are_empty(self):
-        config = NovaConfig()
+        config = NovaConfig(_env_file=None)
         assert config.gemini_api_key == ""
         assert config.groq_api_key == ""
         assert config.cloudflare_account_id == ""
@@ -42,7 +58,7 @@ class TestNovaConfigFromEnv:
         monkeypatch.setenv("NOVA_SAMPLE_RATE", "44100")
         monkeypatch.setenv("NOVA_LOG_LEVEL", "DEBUG")
 
-        config = NovaConfig()
+        config = NovaConfig(_env_file=None)
         assert config.gemini_api_key == "test-gemini-key"
         assert config.groq_api_key == "test-groq-key"
         assert config.sample_rate == 44100
@@ -50,30 +66,34 @@ class TestNovaConfigFromEnv:
 
 
 class TestAPIKeyValidation:
+    @pytest.mark.usefixtures("_clean_env")
     def test_no_keys_raises_error(self):
-        config = NovaConfig()
+        config = NovaConfig(_env_file=None)
         with pytest.raises(ValueError, match="No LLM API key configured"):
             config.validate_api_keys()
 
     def test_gemini_key_alone_is_sufficient(self, monkeypatch):
         monkeypatch.setenv("NOVA_GEMINI_API_KEY", "some-key")
-        config = NovaConfig()
+        config = NovaConfig(_env_file=None)
         config.validate_api_keys()  # should not raise
 
     def test_groq_key_alone_is_sufficient(self, monkeypatch):
         monkeypatch.setenv("NOVA_GROQ_API_KEY", "some-key")
-        config = NovaConfig()
+        config = NovaConfig(_env_file=None)
         config.validate_api_keys()  # should not raise
 
+    @pytest.mark.usefixtures("_clean_env")
     def test_cloudflare_needs_both_id_and_token(self):
-        config = NovaConfig(cloudflare_account_id="id-only")
+        config = NovaConfig(cloudflare_account_id="id-only", _env_file=None)
         with pytest.raises(ValueError, match="No LLM API key configured"):
             config.validate_api_keys()
 
+    @pytest.mark.usefixtures("_clean_env")
     def test_cloudflare_both_fields_is_sufficient(self):
         config = NovaConfig(
             cloudflare_account_id="my-id",
             cloudflare_api_token="my-token",
+            _env_file=None,
         )
         config.validate_api_keys()  # should not raise
 
