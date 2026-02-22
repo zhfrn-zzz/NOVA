@@ -128,9 +128,9 @@ nova/
 - [x] Task 7: Audio capture with VAD
 - [x] Task 8: Text-only pipeline integration ← **Integration Milestone**
 - [x] Task 9: Full voice pipeline ← **MVP Milestone**
-- [ ] Task 10: Fallback providers + router wiring
-- [ ] Task 11: Error handling & resilience
-- [ ] Task 12: Logging & monitoring
+- [x] Task 10: Fallback providers + router wiring
+- [x] Task 11: Error handling & resilience
+- [x] Task 12: Logging & monitoring
 - [ ] Task 13: Wake word detection (Phase 2)
 - [ ] Task 14: System control tools (Phase 2)
 - [ ] Task 15: Response caching (Phase 2)

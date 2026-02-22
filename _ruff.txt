@@ -1,0 +1,4 @@
+C:\Users\Zhafran\Documents\NOVA (Neural-Orchestrated Voice Assistant)\src\nova\main.py:63 E501
+C:\Users\Zhafran\Documents\NOVA (Neural-Orchestrated Voice Assistant)\src\nova\orchestrator.py:10 F401
+C:\Users\Zhafran\Documents\NOVA (Neural-Orchestrated Voice Assistant)\src\nova\orchestrator.py:283 F841
+C:\Users\Zhafran\Documents\NOVA (Neural-Orchestrated Voice Assistant)\src\nova\utils\logger.py:4 F401

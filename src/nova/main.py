@@ -6,31 +6,11 @@ import logging
 import sys
 
 from rich.console import Console
-from rich.logging import RichHandler
 
 from nova.config import get_config
-from nova.orchestrator import Orchestrator
+from nova.utils.logger import setup_logging
 
 console = Console()
-
-
-def _setup_logging(verbose: bool = False) -> None:
-    """Configure logging with rich output."""
-    level = logging.DEBUG if verbose else logging.INFO
-    config = get_config()
-    if not verbose:
-        level = getattr(logging, config.log_level.upper(), logging.INFO)
-
-    logging.basicConfig(
-        level=level,
-        format="%(message)s",
-        datefmt="[%X]",
-        handlers=[RichHandler(console=console, rich_tracebacks=True, show_path=False)],
-    )
-    # Quiet noisy third-party loggers
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("httpcore").setLevel(logging.WARNING)
-    logging.getLogger("aiohttp").setLevel(logging.WARNING)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -49,10 +29,44 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Enable debug logging",
     )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Check connectivity to all providers, mic, and audio player",
+    )
     return parser.parse_args()
 
 
-async def _text_mode(orchestrator: Orchestrator) -> None:
+async def _run_check() -> None:
+    """Test connectivity to all providers, microphone, and audio player."""
+    from nova.orchestrator import Orchestrator
+
+    console.print("\n[bold]NOVA System Check[/]\n")
+
+    orchestrator = Orchestrator()
+    results = await orchestrator.check_providers()
+
+    all_ok = True
+    for component, info in results.items():
+        available = info["available"]
+        status = info["status"]
+        if available:
+            console.print(f"  [green]✅[/] {component}: {status}")
+        else:
+            console.print(f"  [red]❌[/] {component}: {status}")
+            all_ok = False
+
+    console.print()
+    if all_ok:
+        console.print("[bold green]All systems operational.[/]\n")
+    else:
+        console.print(
+            "[bold yellow]Some components unavailable"
+            " — NOVA may have reduced functionality.[/]\n"
+        )
+
+
+async def _text_mode(orchestrator) -> None:
     """Run the text-only interactive loop."""
     console.print("[bold green]NOVA[/] ready (text mode). Type 'exit' to quit.\n")
 
@@ -77,10 +91,10 @@ async def _text_mode(orchestrator: Orchestrator) -> None:
             break
         except Exception:
             logging.getLogger(__name__).exception("Error during interaction")
-            console.print("[red]An error occurred. Please try again.[/]\n")
+            console.print("[red]Terjadi kesalahan, tapi saya masih berjalan.[/]\n")
 
 
-async def _voice_mode(orchestrator: Orchestrator) -> None:
+async def _voice_mode(orchestrator) -> None:
     """Run the push-to-talk voice interactive loop."""
     console.print(
         "[bold green]NOVA[/] ready (voice mode). "
@@ -88,11 +102,17 @@ async def _voice_mode(orchestrator: Orchestrator) -> None:
     )
 
     loop = asyncio.get_event_loop()
+    text_fallback = False  # Set to True if mic fails
 
     while True:
         try:
+            if text_fallback:
+                prompt = "Type your message (or 'exit'): "
+            else:
+                prompt = "Press Enter to speak (or type 'exit'): "
+
             user_input = await loop.run_in_executor(
-                None, lambda: input("Press Enter to speak (or type 'exit'): "),
+                None, lambda: input(prompt),
             )
         except EOFError:
             break
@@ -102,7 +122,7 @@ async def _voice_mode(orchestrator: Orchestrator) -> None:
         if stripped in ("exit", "quit", "bye"):
             break
 
-        # If they typed actual text instead of just pressing Enter, use text mode for it
+        # If they typed actual text, use text mode for it
         if user_input.strip():
             try:
                 response = await orchestrator.handle_interaction(user_input.strip())
@@ -111,17 +131,37 @@ async def _voice_mode(orchestrator: Orchestrator) -> None:
                 break
             except Exception:
                 logging.getLogger(__name__).exception("Error during interaction")
-                console.print("[red]An error occurred. Please try again.[/]\n")
+                console.print("[red]Terjadi kesalahan, tapi saya masih berjalan.[/]\n")
+            continue
+
+        # Text fallback mode — don't try to record
+        if text_fallback:
             continue
 
         # Push-to-talk: Enter was pressed with no text
-        console.print("[bold yellow]Listening...[/]")
+        console.print("[bold yellow]🎤 Listening...[/]")
 
         try:
             response = await orchestrator.handle_voice_interaction()
 
+            # Handle sentinel values from orchestrator
+            if response == "__AUDIO_DEVICE_ERROR__":
+                console.print(
+                    "[red]Mikrofon tidak ditemukan, beralih ke mode teks.[/]\n"
+                )
+                text_fallback = True
+                continue
+
+            if response == "__STT_FAILED__":
+                console.print(
+                    "[yellow]Maaf, saya tidak bisa mendengar sekarang. "
+                    "Coba ketik saja.[/]\n"
+                )
+                text_fallback = True
+                continue
+
             if response is None:
-                console.print("[dim]No speech detected. Try again.[/]\n")
+                console.print("[dim]Saya tidak mendengar apa-apa, bisa diulang?[/]\n")
                 continue
 
             # Print what was heard and the response
@@ -134,20 +174,28 @@ async def _voice_mode(orchestrator: Orchestrator) -> None:
             console.print("\n[dim]Cancelled.[/]\n")
         except Exception:
             logging.getLogger(__name__).exception("Error during voice interaction")
-            console.print("[red]An error occurred. Please try again.[/]\n")
+            console.print("[red]Terjadi kesalahan, tapi saya masih berjalan.[/]\n")
 
 
 async def _async_main() -> None:
     """Async entry point."""
     args = _parse_args()
-    _setup_logging(verbose=args.verbose)
 
     config = get_config()
+    setup_logging(verbose=args.verbose, log_level=config.log_level)
+
+    # --check mode: test all providers and exit
+    if args.check:
+        await _run_check()
+        return
+
     try:
         config.validate_api_keys()
     except ValueError as e:
         console.print(f"[bold red]Configuration error:[/] {e}")
         sys.exit(1)
+
+    from nova.orchestrator import Orchestrator
 
     orchestrator = Orchestrator()
 
