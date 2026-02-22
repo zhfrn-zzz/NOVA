@@ -99,7 +99,7 @@ nova/
 │       │       └── cloudflare_tts.py
 │       ├── tools/
 │       │   ├── __init__.py
-│       │   ├── system_control.py # Volume, brightness, app launch
+│       │   ├── system_control.py # Volume, media, apps, screenshot, timer, power
 │       │   ├── web_search.py     # DuckDuckGo / SearXNG
 │       │   └── time_date.py      # Local time/date
 │       ├── memory/
@@ -137,7 +137,7 @@ nova/
 - [x] Task 12: Logging & monitoring
 - [x] Task 13: Wake word detection — hotkey fallback (Phase 2)
 - [x] Task 13.5: OpenWakeWord integration — always-listening with hey_nova.onnx
-- [x] Task 14: System control tools (Phase 2)
+- [x] Task 14: System control tools (Phase 2) — volume, mute, media, apps, screenshot, timer, power
 - [ ] Task 15: Response caching (Phase 2)
 - [x] Task 15.5: Persistent user memory — remember_fact/recall_facts (Phase 2)
 - [x] Task 16: Web search tool (Phase 2)

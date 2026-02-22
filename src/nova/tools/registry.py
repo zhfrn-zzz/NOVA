@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _FUNCTION_DECLARATIONS = [
+    # ── Time / Date ──────────────────────────────────────────────────
     types.FunctionDeclaration(
         name="get_current_time",
         description=(
@@ -50,6 +51,7 @@ _FUNCTION_DECLARATIONS = [
             "properties": {},
         },
     ),
+    # ── Volume ───────────────────────────────────────────────────────
     types.FunctionDeclaration(
         name="volume_up",
         description=(
@@ -73,6 +75,71 @@ _FUNCTION_DECLARATIONS = [
         },
     ),
     types.FunctionDeclaration(
+        name="mute_unmute",
+        description=(
+            "Toggle system audio mute/unmute. Use when the user says 'mute', "
+            "'unmute', 'bisukan', 'matikan suara', or similar."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    # ── Media Controls ───────────────────────────────────────────────
+    types.FunctionDeclaration(
+        name="play_pause_media",
+        description=(
+            "Toggle media play/pause. Use when the user says 'play', 'pause', "
+            "'putar musik', 'pause musik', 'stop musik', or similar."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    types.FunctionDeclaration(
+        name="next_track",
+        description=(
+            "Skip to next media track. Use when the user says 'next', 'skip', "
+            "'lagu selanjutnya', 'next track', or similar."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    types.FunctionDeclaration(
+        name="previous_track",
+        description=(
+            "Go to previous media track. Use when the user says 'previous', 'back', "
+            "'lagu sebelumnya', 'previous track', or similar."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    # ── Applications ─────────────────────────────────────────────────
+    types.FunctionDeclaration(
+        name="open_app",
+        description=(
+            "Open an application by name. Supports: notepad, calculator, spotify, "
+            "discord, whatsapp, vscode, explorer, paint, settings, task manager. "
+            "Use when the user says 'buka spotify', 'open notepad', 'buka kalkulator', "
+            "etc. For unlisted apps, try the name directly."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {
+                "app_name": {
+                    "type": "string",
+                    "description": "App name, e.g. 'spotify', 'notepad', 'vscode'.",
+                },
+            },
+            "required": ["app_name"],
+        },
+    ),
+    types.FunctionDeclaration(
         name="open_browser",
         description=(
             "Open the default web browser. Use when the user says 'open browser', "
@@ -81,6 +148,23 @@ _FUNCTION_DECLARATIONS = [
         parameters_json_schema={
             "type": "object",
             "properties": {},
+        },
+    ),
+    types.FunctionDeclaration(
+        name="open_url",
+        description=(
+            "Open a specific URL in the default browser. Use when the user asks "
+            "to open a website like 'buka youtube', 'open github.com', etc."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "Full URL to open, e.g. 'https://youtube.com'.",
+                },
+            },
+            "required": ["url"],
         },
     ),
     types.FunctionDeclaration(
@@ -95,6 +179,18 @@ _FUNCTION_DECLARATIONS = [
         },
     ),
     types.FunctionDeclaration(
+        name="open_file_manager",
+        description=(
+            "Open the file manager (Explorer). Use when the user says 'open explorer', "
+            "'buka file manager', 'buka explorer', or similar."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    # ── System Power ─────────────────────────────────────────────────
+    types.FunctionDeclaration(
         name="lock_screen",
         description=(
             "Lock the computer screen. Use when the user says 'lock screen', "
@@ -105,6 +201,87 @@ _FUNCTION_DECLARATIONS = [
             "properties": {},
         },
     ),
+    types.FunctionDeclaration(
+        name="shutdown_pc",
+        description=(
+            "Schedule a system shutdown with a countdown. Default 60 seconds delay. "
+            "Use when the user says 'shutdown', 'matikan komputer', 'turn off pc'. "
+            "Always confirm with the user before executing."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {
+                "delay_seconds": {
+                    "type": "integer",
+                    "description": "Seconds before shutdown (default 60).",
+                },
+            },
+        },
+    ),
+    types.FunctionDeclaration(
+        name="restart_pc",
+        description=(
+            "Schedule a system restart with a countdown. Default 60 seconds delay. "
+            "Use when the user says 'restart', 'restart komputer', 'reboot'. "
+            "Always confirm with the user before executing."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {
+                "delay_seconds": {
+                    "type": "integer",
+                    "description": "Seconds before restart (default 60).",
+                },
+            },
+        },
+    ),
+    types.FunctionDeclaration(
+        name="sleep_pc",
+        description=(
+            "Put the PC to sleep mode. Use when the user says 'sleep', "
+            "'tidurkan komputer', 'sleep mode', or similar."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    # ── Screenshot ───────────────────────────────────────────────────
+    types.FunctionDeclaration(
+        name="take_screenshot",
+        description=(
+            "Take a screenshot and save it. Use when the user says 'screenshot', "
+            "'ambil screenshot', 'tangkap layar', 'take screenshot', or similar."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    # ── Timer ────────────────────────────────────────────────────────
+    types.FunctionDeclaration(
+        name="set_timer",
+        description=(
+            "Set a countdown timer that shows a notification when done. "
+            "Use when the user says 'set timer 5 menit', 'timer 30 detik', "
+            "'remind me in 10 minutes', or similar. Convert to seconds."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {
+                "seconds": {
+                    "type": "integer",
+                    "description": "Timer duration in seconds.",
+                },
+                "label": {
+                    "type": "string",
+                    "description": "Description for the notification (default 'Timer').",
+                },
+            },
+            "required": ["seconds"],
+        },
+    ),
+    # ── Web Search ───────────────────────────────────────────────────
     types.FunctionDeclaration(
         name="web_search",
         description=(
@@ -127,6 +304,7 @@ _FUNCTION_DECLARATIONS = [
             "required": ["query"],
         },
     ),
+    # ── User Memory ──────────────────────────────────────────────────
     types.FunctionDeclaration(
         name="remember_fact",
         description=(
@@ -176,9 +354,21 @@ _TOOL_IMPLEMENTATIONS: dict[str, object] = {
     "get_current_datetime": time_date.get_current_datetime,
     "volume_up": system_control.volume_up,
     "volume_down": system_control.volume_down,
+    "mute_unmute": system_control.mute_unmute,
+    "play_pause_media": system_control.play_pause_media,
+    "next_track": system_control.next_track,
+    "previous_track": system_control.previous_track,
+    "open_app": system_control.open_app,
     "open_browser": system_control.open_browser,
+    "open_url": system_control.open_url,
     "open_terminal": system_control.open_terminal,
+    "open_file_manager": system_control.open_file_manager,
     "lock_screen": system_control.lock_screen,
+    "shutdown_pc": system_control.shutdown_pc,
+    "restart_pc": system_control.restart_pc,
+    "sleep_pc": system_control.sleep_pc,
+    "take_screenshot": system_control.take_screenshot,
+    "set_timer": system_control.set_timer,
     "web_search": web_search.web_search,
     "remember_fact": remember_fact,
     "recall_facts": recall_facts,

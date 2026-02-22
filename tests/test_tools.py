@@ -47,14 +47,18 @@ class TestToolRegistry:
 
     def test_get_all_tool_names(self):
         names = get_all_tool_names()
-        assert "get_current_time" in names
-        assert "get_current_date" in names
-        assert "get_current_datetime" in names
-        assert "volume_up" in names
-        assert "volume_down" in names
-        assert "open_browser" in names
-        assert "open_terminal" in names
-        assert "lock_screen" in names
+        expected = [
+            "get_current_time", "get_current_date", "get_current_datetime",
+            "volume_up", "volume_down", "mute_unmute",
+            "play_pause_media", "next_track", "previous_track",
+            "open_app", "open_browser", "open_url",
+            "open_terminal", "open_file_manager",
+            "lock_screen", "shutdown_pc", "restart_pc", "sleep_pc",
+            "take_screenshot", "set_timer",
+            "web_search", "remember_fact", "recall_facts",
+        ]
+        for name in expected:
+            assert name in names, f"{name!r} not in registry"
 
     @pytest.mark.asyncio
     async def test_execute_tool_time(self):
