@@ -99,7 +99,14 @@ nova/
 │       │       └── cloudflare_tts.py
 │       ├── tools/
 │       │   ├── __init__.py
+│       │   ├── registry.py       # Central tool registry for Gemini function calling
 │       │   ├── system_control.py # Volume, media, apps, screenshot, timer, power
+│       │   ├── system_info.py    # Battery, RAM, storage, IP, uptime (psutil)
+│       │   ├── notes.py          # Quick notes: add, read, clear (~/.nova/notes.txt)
+│       │   ├── reminders.py      # Timed reminders with TTS + notification
+│       │   ├── dictation.py      # Type text into active window (pyautogui)
+│       │   ├── display_control.py # Brightness up/down/get (screen-brightness-control)
+│       │   ├── network_control.py # Wi-Fi on/off/status (netsh/nmcli)
 │       │   ├── web_search.py     # DuckDuckGo / SearXNG
 │       │   └── time_date.py      # Local time/date
 │       ├── memory/
@@ -143,6 +150,12 @@ nova/
 - [x] Task 16: Web search tool (Phase 2)
 - [ ] Task 17: Audio streaming TTS (Phase 2)
 - [ ] Task 18: Systemd service + setup script (Phase 2)
+- [x] Task 19: System info tools — battery, RAM, storage, IP, uptime (Phase 2)
+- [x] Task 20: Quick notes — add/read/clear notes (Phase 2)
+- [x] Task 21: Reminders — timed reminders with TTS + notification (Phase 2)
+- [x] Task 22: Dictation — type text into active window (Phase 2)
+- [x] Task 23: Display brightness control — up/down/get (Phase 2)
+- [x] Task 24: Network control — Wi-Fi on/off/status (Phase 2)
 
 ## Important Notes
 

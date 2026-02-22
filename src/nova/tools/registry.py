@@ -9,7 +9,17 @@ import logging
 from google.genai import types
 
 from nova.memory.persistent import recall_facts, remember_fact
-from nova.tools import system_control, time_date, web_search
+from nova.tools import (
+    dictation,
+    display_control,
+    network_control,
+    notes,
+    reminders,
+    system_control,
+    system_info,
+    time_date,
+    web_search,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -345,33 +355,276 @@ _FUNCTION_DECLARATIONS = [
             "properties": {},
         },
     ),
+    # ── System Info ──────────────────────────────────────────────────
+    types.FunctionDeclaration(
+        name="get_battery_level",
+        description=(
+            "Get battery percentage and charging status. Use when the user asks "
+            "'berapa persen baterai', 'battery level', 'baterai tinggal berapa', "
+            "'is it charging', or similar."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    types.FunctionDeclaration(
+        name="get_ram_usage",
+        description=(
+            "Get current RAM/memory usage in GB and percentage. Use when the user asks "
+            "'berapa RAM terpakai', 'memory usage', 'cek RAM', or similar."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    types.FunctionDeclaration(
+        name="get_storage_info",
+        description=(
+            "Get disk storage usage (used/total/free in GB). Use when the user asks "
+            "'berapa sisa storage', 'disk space', 'cek penyimpanan', or similar."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    types.FunctionDeclaration(
+        name="get_ip_address",
+        description=(
+            "Get the local and public IP addresses. Use when the user asks "
+            "'berapa IP saya', 'what is my IP', 'cek IP address', or similar."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    types.FunctionDeclaration(
+        name="get_system_uptime",
+        description=(
+            "Get how long the system has been running since last boot. Use when the user "
+            "asks 'sudah berapa lama menyala', 'uptime', 'kapan terakhir restart', or similar."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    # ── Quick Notes ──────────────────────────────────────────────────
+    types.FunctionDeclaration(
+        name="add_note",
+        description=(
+            "Save a quick note with a timestamp. Use when the user says "
+            "'catat', 'note', 'tulis catatan', 'save note', 'tambah catatan', or similar. "
+            "Examples: 'catat: beli kopi besok', 'note: meeting jam 3'."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "description": "The note content to save.",
+                },
+            },
+            "required": ["text"],
+        },
+    ),
+    types.FunctionDeclaration(
+        name="get_notes",
+        description=(
+            "Read the last 10 saved notes. Use when the user asks "
+            "'lihat catatan', 'baca catatan', 'show notes', 'my notes', or similar."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    types.FunctionDeclaration(
+        name="clear_notes",
+        description=(
+            "Delete all saved notes. Use when the user says "
+            "'hapus semua catatan', 'clear notes', 'delete all notes', or similar."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    # ── Reminders ────────────────────────────────────────────────────
+    types.FunctionDeclaration(
+        name="set_reminder",
+        description=(
+            "Set a reminder that will speak a message and show a notification after "
+            "the specified number of minutes. Use when the user says "
+            "'ingatkan saya 5 menit lagi', 'remind me in 10 minutes', "
+            "'set reminder', 'ingatkan untuk istirahat', or similar. "
+            "Convert the time to minutes."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {
+                "minutes": {
+                    "type": "integer",
+                    "description": "Minutes from now until the reminder fires.",
+                },
+                "message": {
+                    "type": "string",
+                    "description": "The reminder message to speak and display.",
+                },
+            },
+            "required": ["minutes", "message"],
+        },
+    ),
+    # ── Dictation ────────────────────────────────────────────────────
+    types.FunctionDeclaration(
+        name="dictate",
+        description=(
+            "Type text into the currently active window (simulates keyboard input). "
+            "Use when the user says 'ketik', 'type', 'tulis di layar', 'dictate', "
+            "'ketikkan', or similar. The text will be typed into whatever app is focused. "
+            "Examples: 'ketik: hello world', 'type this email for me'."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "description": "The text to type into the active window.",
+                },
+            },
+            "required": ["text"],
+        },
+    ),
+    # ── Display / Brightness ─────────────────────────────────────────
+    types.FunctionDeclaration(
+        name="brightness_up",
+        description=(
+            "Increase screen brightness by 10%. Use when the user says "
+            "'naikkan brightness', 'brightness up', 'terangin layar', 'lebih terang', "
+            "or similar."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    types.FunctionDeclaration(
+        name="brightness_down",
+        description=(
+            "Decrease screen brightness by 10%. Use when the user says "
+            "'turunkan brightness', 'brightness down', 'redup layar', 'kurangi terang', "
+            "or similar."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    types.FunctionDeclaration(
+        name="get_brightness",
+        description=(
+            "Get the current screen brightness level. Use when the user asks "
+            "'berapa brightness', 'brightness level', 'tingkat kecerahan', or similar."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    # ── Network / Wi-Fi ──────────────────────────────────────────────
+    types.FunctionDeclaration(
+        name="wifi_on",
+        description=(
+            "Enable Wi-Fi. Use when the user says 'nyalakan wifi', 'wifi on', "
+            "'aktifkan wifi', 'turn on wifi', or similar."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    types.FunctionDeclaration(
+        name="wifi_off",
+        description=(
+            "Disable Wi-Fi. Use when the user says 'matikan wifi', 'wifi off', "
+            "'nonaktifkan wifi', 'turn off wifi', or similar."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    types.FunctionDeclaration(
+        name="get_wifi_status",
+        description=(
+            "Get current Wi-Fi connection status and connected SSID. Use when the user "
+            "asks 'status wifi', 'wifi connected?', 'terhubung ke wifi apa', or similar."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
 ]
 
 # Map function names → async callables
 _TOOL_IMPLEMENTATIONS: dict[str, object] = {
+    # Time/Date
     "get_current_time": time_date.get_current_time,
     "get_current_date": time_date.get_current_date,
     "get_current_datetime": time_date.get_current_datetime,
+    # Volume
     "volume_up": system_control.volume_up,
     "volume_down": system_control.volume_down,
     "mute_unmute": system_control.mute_unmute,
+    # Media
     "play_pause_media": system_control.play_pause_media,
     "next_track": system_control.next_track,
     "previous_track": system_control.previous_track,
+    # Apps
     "open_app": system_control.open_app,
     "open_browser": system_control.open_browser,
     "open_url": system_control.open_url,
     "open_terminal": system_control.open_terminal,
     "open_file_manager": system_control.open_file_manager,
+    # Power
     "lock_screen": system_control.lock_screen,
     "shutdown_pc": system_control.shutdown_pc,
     "restart_pc": system_control.restart_pc,
     "sleep_pc": system_control.sleep_pc,
+    # Screenshot & Timer
     "take_screenshot": system_control.take_screenshot,
     "set_timer": system_control.set_timer,
+    # Web Search
     "web_search": web_search.web_search,
+    # User Memory
     "remember_fact": remember_fact,
     "recall_facts": recall_facts,
+    # System Info
+    "get_battery_level": system_info.get_battery_level,
+    "get_ram_usage": system_info.get_ram_usage,
+    "get_storage_info": system_info.get_storage_info,
+    "get_ip_address": system_info.get_ip_address,
+    "get_system_uptime": system_info.get_system_uptime,
+    # Quick Notes
+    "add_note": notes.add_note,
+    "get_notes": notes.get_notes,
+    "clear_notes": notes.clear_notes,
+    # Reminders
+    "set_reminder": reminders.set_reminder,
+    # Dictation
+    "dictate": dictation.dictate,
+    # Display / Brightness
+    "brightness_up": display_control.brightness_up,
+    "brightness_down": display_control.brightness_down,
+    "get_brightness": display_control.get_brightness,
+    # Network / Wi-Fi
+    "wifi_on": network_control.wifi_on,
+    "wifi_off": network_control.wifi_off,
+    "get_wifi_status": network_control.get_wifi_status,
 }
 
 

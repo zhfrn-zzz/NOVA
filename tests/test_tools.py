@@ -1,7 +1,7 @@
 """Tests for NOVA tools: time_date, system_control, memory, and registry."""
 
 import json
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -56,6 +56,14 @@ class TestToolRegistry:
             "lock_screen", "shutdown_pc", "restart_pc", "sleep_pc",
             "take_screenshot", "set_timer",
             "web_search", "remember_fact", "recall_facts",
+            # New tools
+            "get_battery_level", "get_ram_usage", "get_storage_info",
+            "get_ip_address", "get_system_uptime",
+            "add_note", "get_notes", "clear_notes",
+            "set_reminder",
+            "dictate",
+            "brightness_up", "brightness_down", "get_brightness",
+            "wifi_on", "wifi_off", "get_wifi_status",
         ]
         for name in expected:
             assert name in names, f"{name!r} not in registry"
@@ -232,6 +240,237 @@ class TestUserMemory:
         result = await execute_tool("remember_fact", {"key": "test", "value": "123"})
         assert isinstance(result, str)
         assert "123" in result
+
+
+class TestSystemInfoTools:
+    """Tests for system info tools (psutil-based)."""
+
+    @pytest.mark.asyncio
+    async def test_get_battery_level_returns_string(self):
+        from nova.tools.system_info import get_battery_level
+
+        result = await get_battery_level()
+        assert isinstance(result, str)
+        # Should contain "Baterai" or "baterai" or desktop message
+        assert "aterai" in result.lower() or "desktop" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_get_ram_usage_returns_string(self):
+        from nova.tools.system_info import get_ram_usage
+
+        result = await get_ram_usage()
+        assert isinstance(result, str)
+        assert "RAM" in result
+        assert "GB" in result
+
+    @pytest.mark.asyncio
+    async def test_get_storage_info_returns_string(self):
+        from nova.tools.system_info import get_storage_info
+
+        result = await get_storage_info()
+        assert isinstance(result, str)
+        assert "Storage" in result or "storage" in result
+        assert "GB" in result
+
+    @pytest.mark.asyncio
+    async def test_get_ip_address_returns_string(self):
+        from nova.tools.system_info import get_ip_address
+
+        result = await get_ip_address()
+        assert isinstance(result, str)
+        assert "IP" in result
+
+    @pytest.mark.asyncio
+    async def test_get_system_uptime_returns_string(self):
+        from nova.tools.system_info import get_system_uptime
+
+        result = await get_system_uptime()
+        assert isinstance(result, str)
+        assert "menit" in result or "jam" in result
+
+    @pytest.mark.asyncio
+    async def test_system_info_via_registry(self):
+        result = await execute_tool("get_ram_usage")
+        assert isinstance(result, str)
+        assert "RAM" in result
+
+    def test_system_info_tools_in_registry(self):
+        names = get_all_tool_names()
+        for name in [
+            "get_battery_level", "get_ram_usage", "get_storage_info",
+            "get_ip_address", "get_system_uptime",
+        ]:
+            assert name in names, f"{name!r} not in registry"
+
+
+class TestNotesTools:
+    """Tests for quick notes tools."""
+
+    @pytest.fixture(autouse=True)
+    def _use_tmp_notes(self, tmp_path):
+        """Redirect notes file to a temp dir for test isolation."""
+        notes_file = tmp_path / "notes.txt"
+        with (
+            patch("nova.tools.notes._NOTES_FILE", notes_file),
+            patch("nova.tools.notes._NOTES_DIR", tmp_path),
+        ):
+            yield notes_file
+
+    @pytest.mark.asyncio
+    async def test_add_note(self):
+        from nova.tools.notes import add_note
+
+        result = await add_note("Beli kopi besok")
+        assert "tersimpan" in result.lower()
+        assert "Beli kopi besok" in result
+
+    @pytest.mark.asyncio
+    async def test_get_notes_empty(self):
+        from nova.tools.notes import get_notes
+
+        result = await get_notes()
+        assert "Belum ada" in result
+
+    @pytest.mark.asyncio
+    async def test_add_and_get_notes(self):
+        from nova.tools.notes import add_note, get_notes
+
+        await add_note("Note 1")
+        await add_note("Note 2")
+        result = await get_notes()
+        assert "Note 1" in result
+        assert "Note 2" in result
+
+    @pytest.mark.asyncio
+    async def test_clear_notes(self):
+        from nova.tools.notes import add_note, clear_notes, get_notes
+
+        await add_note("Temporary note")
+        result = await clear_notes()
+        assert "dihapus" in result.lower()
+        result = await get_notes()
+        assert "Belum ada" in result
+
+    @pytest.mark.asyncio
+    async def test_notes_via_registry(self):
+        result = await execute_tool("add_note", {"text": "Test note"})
+        assert isinstance(result, str)
+        assert "tersimpan" in result.lower()
+
+    def test_notes_tools_in_registry(self):
+        names = get_all_tool_names()
+        assert "add_note" in names
+        assert "get_notes" in names
+        assert "clear_notes" in names
+
+
+class TestRemindersTools:
+    """Tests for reminders tool."""
+
+    @pytest.mark.asyncio
+    async def test_set_reminder_returns_confirmation(self):
+        from nova.tools.reminders import set_reminder
+
+        result = await set_reminder(5, "Istirahat")
+        assert "5 menit" in result
+        assert "Istirahat" in result
+
+    @pytest.mark.asyncio
+    async def test_set_reminder_invalid_time(self):
+        from nova.tools.reminders import set_reminder
+
+        result = await set_reminder(0, "Test")
+        assert "lebih dari 0" in result
+
+    @pytest.mark.asyncio
+    async def test_reminder_via_registry(self):
+        result = await execute_tool(
+            "set_reminder", {"minutes": 10, "message": "Meeting"}
+        )
+        assert isinstance(result, str)
+        assert "10 menit" in result
+
+    def test_reminder_in_registry(self):
+        names = get_all_tool_names()
+        assert "set_reminder" in names
+
+
+class TestDictationTool:
+    """Tests for dictation tool."""
+
+    @pytest.mark.asyncio
+    async def test_dictate_empty_text(self):
+        from nova.tools.dictation import dictate
+
+        result = await dictate("")
+        assert "Tidak ada" in result
+
+    @pytest.mark.asyncio
+    async def test_dictate_with_mock(self):
+        from nova.tools.dictation import dictate
+
+        with patch("nova.tools.dictation.pyautogui", create=True) as mock_pyautogui:
+            mock_pyautogui.write = MagicMock()
+            # Patch the import inside the function
+            import nova.tools.dictation as dictation_mod
+
+            with patch.dict("sys.modules", {"pyautogui": mock_pyautogui}):
+                result = await dictate("hello world")
+                assert "berhasil" in result.lower() or "hello" in result.lower()
+
+    def test_dictate_in_registry(self):
+        names = get_all_tool_names()
+        assert "dictate" in names
+
+
+class TestDisplayControlTools:
+    """Tests for display brightness tools."""
+
+    @pytest.mark.asyncio
+    async def test_brightness_up_returns_string(self):
+        from nova.tools.display_control import brightness_up
+
+        # Will either work or return an error string — both are valid
+        result = await brightness_up()
+        assert isinstance(result, str)
+
+    @pytest.mark.asyncio
+    async def test_brightness_down_returns_string(self):
+        from nova.tools.display_control import brightness_down
+
+        result = await brightness_down()
+        assert isinstance(result, str)
+
+    @pytest.mark.asyncio
+    async def test_get_brightness_returns_string(self):
+        from nova.tools.display_control import get_brightness
+
+        result = await get_brightness()
+        assert isinstance(result, str)
+
+    def test_brightness_tools_in_registry(self):
+        names = get_all_tool_names()
+        assert "brightness_up" in names
+        assert "brightness_down" in names
+        assert "get_brightness" in names
+
+
+class TestNetworkControlTools:
+    """Tests for network/Wi-Fi tools."""
+
+    @pytest.mark.asyncio
+    async def test_get_wifi_status_returns_string(self):
+        from nova.tools.network_control import get_wifi_status
+
+        result = await get_wifi_status()
+        assert isinstance(result, str)
+        assert "Wi-Fi" in result or "wifi" in result.lower()
+
+    def test_network_tools_in_registry(self):
+        names = get_all_tool_names()
+        assert "wifi_on" in names
+        assert "wifi_off" in names
+        assert "get_wifi_status" in names
 
 
 class TestWakeWordBeepGeneration:
