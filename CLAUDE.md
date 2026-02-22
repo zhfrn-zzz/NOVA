@@ -122,7 +122,7 @@ nova/
 - [x] Task 1: Project scaffolding
 - [x] Task 2: Provider base interfaces
 - [x] Task 3: Configuration system
-- [ ] Task 4: Edge TTS provider (primary TTS)
+- [x] Task 4: Edge TTS provider (primary TTS)
 - [ ] Task 5: Gemini LLM provider (primary LLM)
 - [ ] Task 6: Groq Whisper STT provider (primary STT)
 - [ ] Task 7: Audio capture with VAD
