@@ -22,6 +22,7 @@ dependencies = [
     "python-mpv>=1.0",
     "rich>=13.0",
     "pydantic-settings>=2.0",
+    "pynput>=1.7",
 ]
 
 [project.optional-dependencies]

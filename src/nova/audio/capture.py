@@ -36,6 +36,7 @@ class AudioCapture:
         self.silence_threshold = config.silence_threshold
         self.silence_duration = config.silence_duration
         self.max_recording_seconds = config.max_recording_seconds
+        self.min_recording_seconds = 1.5  # Pad short clips to avoid hallucinations
         # Process audio in 100ms chunks
         self._chunk_duration = 0.1
         self._chunk_samples = int(self.sample_rate * self._chunk_duration)
@@ -112,6 +113,17 @@ class AudioCapture:
 
         audio_data = np.concatenate(recorded_chunks)
         duration = len(audio_data) / self.sample_rate
+
+        # Pad short clips with silence to reach minimum duration
+        min_samples = int(self.min_recording_seconds * self.sample_rate)
+        if len(audio_data) < min_samples:
+            padding = np.zeros(min_samples - len(audio_data), dtype=audio_data.dtype)
+            audio_data = np.concatenate([audio_data, padding])
+            logger.info(
+                "AudioCapture: padded %.1fs → %.1fs (min duration)",
+                duration, self.min_recording_seconds,
+            )
+
         logger.info("AudioCapture: captured %.1fs of audio", duration)
 
         return self._to_wav(audio_data)

@@ -1,4 +1,4 @@
-"""Gemini LLM provider — primary LLM using Google GenAI SDK."""
+"""Gemini LLM provider — primary LLM using Google GenAI SDK with function calling."""
 
 import logging
 from collections.abc import AsyncIterator
@@ -28,11 +28,16 @@ SYSTEM_PROMPT = (
     "— plain spoken text only.\n"
     "- Don't say \"as a voice assistant\" or reference your nature unless asked.\n"
     "- Be helpful, direct, and friendly.\n"
-    "- For questions you can't answer, say so briefly rather than making things up."
+    "- For questions you can't answer, say so briefly rather than making things up.\n"
+    "- When the user asks you to perform an action (open browser, volume, etc.) or "
+    "asks about the time/date, use the available tools to fulfill the request."
 )
 
 # Models in order of preference
 _MODELS = ["gemini-2.5-flash", "gemini-2.0-flash-lite"]
+
+# Maximum number of function-call round-trips to prevent infinite loops
+_MAX_TOOL_CALLS = 3
 
 
 def _build_contents(
@@ -81,18 +86,35 @@ class GeminiProvider(LLMProvider):
             raise ProviderError(self.name, "Gemini API key not configured")
         return self._client
 
-    def _get_config(self) -> types.GenerateContentConfig:
-        """Build the generation config with system instruction."""
+    def _get_config(
+        self, tools: list | None = None,
+    ) -> types.GenerateContentConfig:
+        """Build the generation config with system instruction and optional tools.
+
+        Args:
+            tools: Optional list of Tool objects for function calling.
+
+        Returns:
+            GenerateContentConfig instance.
+        """
         return types.GenerateContentConfig(
             system_instruction=SYSTEM_PROMPT,
+            tools=tools,
         )
 
-    async def generate(self, prompt: str, context: list[dict]) -> str:
-        """Generate a response given a prompt and conversation context.
+    async def generate(
+        self, prompt: str, context: list[dict], tools: list | None = None,
+    ) -> str:
+        """Generate a response, handling function calls if tools are provided.
+
+        When tools are provided and the model returns function calls, this
+        method executes them via the tool registry, feeds results back to the
+        model, and returns the final text response.
 
         Args:
             prompt: The user's current message.
             context: Prior exchanges [{"role": "user"|"assistant", "content": str}].
+            tools: Optional list of Tool objects for Gemini function calling.
 
         Returns:
             Generated response text.
@@ -104,13 +126,21 @@ class GeminiProvider(LLMProvider):
         """
         client = self._get_client()
         contents = _build_contents(prompt, context)
+        config = self._get_config(tools=tools)
 
         try:
             response = await client.aio.models.generate_content(
                 model=self._model_name,
                 contents=contents,
-                config=self._get_config(),
+                config=config,
             )
+
+            # Handle function calling loop
+            if tools and response.function_calls:
+                return await self._handle_function_calls(
+                    client, contents, config, response,
+                )
+
             text = response.text
             if not text:
                 raise ProviderError(self.name, "Gemini returned empty response")
@@ -121,6 +151,77 @@ class GeminiProvider(LLMProvider):
             raise
         except Exception as e:
             return self._handle_error(e)
+
+    async def _handle_function_calls(
+        self,
+        client: genai.Client,
+        contents: list[types.Content],
+        config: types.GenerateContentConfig,
+        response,
+    ) -> str:
+        """Execute function calls and continue the conversation.
+
+        Args:
+            client: The GenAI client.
+            contents: Conversation contents so far.
+            config: Generation config with tools.
+            response: The initial response containing function calls.
+
+        Returns:
+            Final text response after all function calls are resolved.
+        """
+        from nova.tools.registry import execute_tool
+
+        for iteration in range(_MAX_TOOL_CALLS):
+            if not response.function_calls:
+                break
+
+            # Append the model's response (with function call parts) to contents
+            function_call_content = response.candidates[0].content
+            contents.append(function_call_content)
+
+            # Execute each function call and collect responses
+            function_response_parts = []
+            for fc_part in response.function_calls:
+                fn_name = fc_part.name
+                fn_args = dict(fc_part.args) if fc_part.args else {}
+
+                logger.info(
+                    "Gemini function call #%d: %s(%s)",
+                    iteration + 1, fn_name, fn_args,
+                )
+
+                try:
+                    result = await execute_tool(fn_name, fn_args)
+                    fn_response = {"result": result}
+                except Exception as e:
+                    logger.error("Tool %s failed: %s", fn_name, e)
+                    fn_response = {"error": str(e)}
+
+                function_response_parts.append(
+                    types.Part.from_function_response(
+                        name=fn_name,
+                        response=fn_response,
+                    )
+                )
+
+            # Add tool results to contents
+            contents.append(
+                types.Content(role="tool", parts=function_response_parts)
+            )
+
+            # Get next response from the model
+            response = await client.aio.models.generate_content(
+                model=self._model_name,
+                contents=contents,
+                config=config,
+            )
+
+        text = response.text
+        if not text:
+            raise ProviderError(self.name, "Gemini returned empty response after tool calls")
+        logger.debug("Gemini: generated %d chars (after tool calls)", len(text))
+        return text
 
     async def generate_stream(
         self, prompt: str, context: list[dict],

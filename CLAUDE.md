@@ -131,8 +131,8 @@ nova/
 - [x] Task 10: Fallback providers + router wiring
 - [x] Task 11: Error handling & resilience
 - [x] Task 12: Logging & monitoring
-- [ ] Task 13: Wake word detection (Phase 2)
-- [ ] Task 14: System control tools (Phase 2)
+- [x] Task 13: Wake word detection (Phase 2)
+- [x] Task 14: System control tools (Phase 2)
 - [ ] Task 15: Response caching (Phase 2)
 - [ ] Task 16: Web search tool (Phase 2)
 - [ ] Task 17: Audio streaming TTS (Phase 2)

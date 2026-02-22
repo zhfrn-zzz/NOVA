@@ -38,6 +38,11 @@ class NovaConfig(BaseSettings):
     # Conversation
     max_context_turns: int = 10
     default_language: str = "auto"
+    stt_language: str = "id"  # Hint for Whisper ("id", "en", or "auto")
+
+    # Wake word / hotkey
+    wake_word_sensitivity: float = 0.5
+    wake_word_hotkey: str = "<ctrl>+<space>"
 
     # System
     log_level: str = "INFO"

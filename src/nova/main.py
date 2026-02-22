@@ -25,6 +25,11 @@ def _parse_args() -> argparse.Namespace:
         help="Text input mode (no microphone)",
     )
     parser.add_argument(
+        "--push-to-talk",
+        action="store_true",
+        help="Push-to-talk mode (press Enter to speak, as in Phase 1)",
+    )
+    parser.add_argument(
         "--verbose", "-v",
         action="store_true",
         help="Enable debug logging",
@@ -97,7 +102,7 @@ async def _text_mode(orchestrator) -> None:
 async def _voice_mode(orchestrator) -> None:
     """Run the push-to-talk voice interactive loop."""
     console.print(
-        "[bold green]NOVA[/] ready (voice mode). "
+        "[bold green]NOVA[/] ready (push-to-talk voice mode). "
         "Press [bold]Enter[/] to speak, type 'exit' to quit.\n"
     )
 
@@ -177,6 +182,127 @@ async def _voice_mode(orchestrator) -> None:
             console.print("[red]Terjadi kesalahan, tapi saya masih berjalan.[/]\n")
 
 
+async def _wake_word_mode(orchestrator) -> None:
+    """Run the wake-word (hotkey) continuous listening mode.
+
+    Listens for the configured hotkey, plays an activation beep,
+    then captures audio and processes the voice interaction.
+    """
+    from nova.audio.wake_word import HotkeyWakeWordDetector
+
+    config = get_config()
+    detector = HotkeyWakeWordDetector()
+    loop = asyncio.get_event_loop()
+    detector.start(loop)
+
+    console.print(
+        f"[bold green]NOVA[/] ready (wake word mode). "
+        f"Press [bold]{config.wake_word_hotkey}[/] to activate, "
+        f"or type 'exit' to quit.\n"
+    )
+
+    text_fallback = False
+
+    # Run a background task for keyboard exit input
+    exit_event = asyncio.Event()
+
+    async def _exit_listener():
+        """Listen for typed 'exit' commands in background."""
+        while not exit_event.is_set():
+            try:
+                user_input = await loop.run_in_executor(
+                    None, lambda: input(),
+                )
+                stripped = user_input.strip().lower()
+                if stripped in ("exit", "quit", "bye"):
+                    exit_event.set()
+                    return
+                # If they typed actual text, process it
+                if user_input.strip():
+                    try:
+                        response = await orchestrator.handle_interaction(user_input.strip())
+                        console.print(f"[bold cyan]Nova:[/] {response}\n")
+                    except Exception:
+                        logging.getLogger(__name__).exception("Error")
+                        console.print("[red]Terjadi kesalahan.[/]\n")
+            except EOFError:
+                exit_event.set()
+                return
+
+    exit_task = asyncio.create_task(_exit_listener())
+
+    try:
+        while not exit_event.is_set():
+            # Wait for either hotkey activation or exit
+            activation_task = asyncio.create_task(detector.wait_for_activation())
+
+            done, pending = await asyncio.wait(
+                [activation_task, exit_task],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            # Cancel pending tasks
+            for task in pending:
+                if task is activation_task:
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+
+            if exit_event.is_set():
+                break
+
+            if activation_task in done:
+                # Hotkey was pressed — capture and process voice
+                console.print("[bold yellow]🎤 Listening...[/]")
+
+                try:
+                    response = await orchestrator.handle_voice_interaction()
+
+                    if response == "__AUDIO_DEVICE_ERROR__":
+                        console.print(
+                            "[red]Mikrofon tidak ditemukan, beralih ke mode teks.[/]\n"
+                        )
+                        text_fallback = True
+                        break
+
+                    if response == "__STT_FAILED__":
+                        console.print(
+                            "[yellow]Maaf, saya tidak bisa mendengar sekarang.[/]\n"
+                        )
+                        continue
+
+                    if response is None:
+                        console.print(
+                            "[dim]Saya tidak mendengar apa-apa, bisa diulang?[/]\n"
+                        )
+                        continue
+
+                    transcript = orchestrator.last_transcript
+                    if transcript:
+                        console.print(f"[bold white]You:[/] {transcript}")
+                    console.print(f"[bold cyan]Nova:[/] {response}\n")
+
+                except Exception:
+                    logging.getLogger(__name__).exception("Voice interaction error")
+                    console.print("[red]Terjadi kesalahan.[/]\n")
+
+    except KeyboardInterrupt:
+        pass
+    finally:
+        detector.stop()
+        exit_task.cancel()
+        try:
+            await exit_task
+        except asyncio.CancelledError:
+            pass
+
+    # If mic failed, fall back to text mode
+    if text_fallback:
+        await _text_mode(orchestrator)
+
+
 async def _async_main() -> None:
     """Async entry point."""
     args = _parse_args()
@@ -201,8 +327,11 @@ async def _async_main() -> None:
 
     if args.text_only:
         await _text_mode(orchestrator)
-    else:
+    elif args.push_to_talk:
         await _voice_mode(orchestrator)
+    else:
+        # Default: wake word / hotkey mode
+        await _wake_word_mode(orchestrator)
 
     console.print("\n[bold green]Sampai jumpa![/] (Goodbye!)")
 

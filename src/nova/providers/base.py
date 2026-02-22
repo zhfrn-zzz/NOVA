@@ -80,12 +80,15 @@ class LLMProvider(ABC):
     name: str
 
     @abstractmethod
-    async def generate(self, prompt: str, context: list[dict]) -> str:
+    async def generate(
+        self, prompt: str, context: list[dict], tools: list | None = None,
+    ) -> str:
         """Generate a response given a prompt and conversation context.
 
         Args:
             prompt: The user's current message.
             context: List of prior exchanges [{"role": "user"|"assistant", "content": str}].
+            tools: Optional list of tool declarations for function calling.
 
         Returns:
             Generated response text.

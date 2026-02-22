@@ -14,6 +14,7 @@ from nova.providers.router import ProviderRouter
 from nova.providers.stt.groq_whisper import GroqWhisperProvider
 from nova.providers.tts.cloudflare_tts import CloudflareTTSProvider
 from nova.providers.tts.edge_tts_provider import EdgeTTSProvider, detect_language
+from nova.tools.registry import get_tool_declarations
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,9 @@ class Orchestrator:
         self._context = ConversationContext(max_turns=config.max_context_turns)
         self._default_language = config.default_language
 
+        # Tool declarations for function calling
+        self._tools = get_tool_declarations()
+
         # Interaction counter for logging
         self._interaction_count = 0
 
@@ -84,7 +88,9 @@ class Orchestrator:
         context = self._context.get_context()
 
         start = time.perf_counter()
-        response = await self._llm_router.execute("generate", text, context)
+        response = await self._llm_router.execute(
+            "generate", text, context, self._tools,
+        )
         elapsed = time.perf_counter() - start
 
         logger.info("LLM responded in %.2fs (%d chars)", elapsed, len(response))

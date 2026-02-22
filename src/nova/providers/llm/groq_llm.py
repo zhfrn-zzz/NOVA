@@ -73,12 +73,15 @@ class GroqLLMProvider(LLMProvider):
         self._api_key = config.groq_api_key
         self._timeout = config.llm_timeout
 
-    async def generate(self, prompt: str, context: list[dict]) -> str:
+    async def generate(
+        self, prompt: str, context: list[dict], tools: list | None = None,
+    ) -> str:
         """Generate a response given a prompt and conversation context.
 
         Args:
             prompt: The user's current message.
             context: Prior exchanges [{"role": "user"|"assistant", "content": str}].
+            tools: Ignored — Groq fallback does not support function calling.
 
         Returns:
             Generated response text.

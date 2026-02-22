@@ -29,7 +29,10 @@ class GroqWhisperProvider(STTProvider):
         config = get_config()
         self._api_key = config.groq_api_key
         self._timeout = config.stt_timeout
-        self._language = config.default_language
+        self._language = config.stt_language
+        self._prompt = (
+            "Ini adalah percakapan dalam bahasa Indonesia dan English."
+        )
 
     async def transcribe(self, audio_bytes: bytes) -> str:
         """Convert WAV audio bytes to text via Groq Whisper API.
@@ -49,7 +52,10 @@ class GroqWhisperProvider(STTProvider):
             raise ProviderError(self.name, "Groq API key not configured")
 
         # Build multipart form data
-        form_data: dict[str, str] = {"model": _MODEL}
+        form_data: dict[str, str] = {
+            "model": _MODEL,
+            "prompt": self._prompt,
+        }
         if self._language and self._language != "auto":
             form_data["language"] = self._language
 
