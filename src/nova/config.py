@@ -42,9 +42,8 @@ class NovaConfig(BaseSettings):
 
     # Wake word / hotkey
     wake_word_model_path: str = "models/hey_nova.onnx"
-    wake_word_threshold: float = 0.5
-    wake_word_vad_threshold: float = 0.5
-    wake_word_sensitivity: float = 0.5
+    wake_word_threshold: float = 0.2
+    wake_word_vad_threshold: float = 0.0
     wake_word_hotkey: str = "<ctrl>+<space>"
 
     # System
