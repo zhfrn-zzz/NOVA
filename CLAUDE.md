@@ -33,7 +33,7 @@ The pipeline: **Mic → Cloud STT → Cloud LLM → Cloud TTS → Speaker**
 3. **Cloudflare Workers AI** (Whisper) — fallback 2
 
 ### LLM (Brain)
-1. **Google Gemini** (2.5 Flash / 2.0 Flash) — 15 RPM, 1500 req/day
+1. **Google Gemini** (2.5 Flash / 2.0 Flash Lite) — 15 RPM, 1500 req/day
 2. **Groq** (Llama 3.3 70B) — 30 RPM, ultra-fast
 3. **Cloudflare Workers AI** (Llama/Mistral) — 10K neurons/day
 4. **OpenRouter** (various free models) — last resort
@@ -123,8 +123,8 @@ nova/
 - [x] Task 2: Provider base interfaces
 - [x] Task 3: Configuration system
 - [x] Task 4: Edge TTS provider (primary TTS)
-- [ ] Task 5: Gemini LLM provider (primary LLM)
-- [ ] Task 6: Groq Whisper STT provider (primary STT)
+- [x] Task 5: Gemini LLM provider (primary LLM)
+- [x] Task 6: Groq Whisper STT provider (primary STT)
 - [ ] Task 7: Audio capture with VAD
 - [ ] Task 8: Text-only pipeline integration ← **Integration Milestone**
 - [ ] Task 9: Full voice pipeline ← **MVP Milestone**
