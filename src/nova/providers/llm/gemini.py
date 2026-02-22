@@ -16,7 +16,7 @@ from nova.providers.base import (
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = (
+_BASE_SYSTEM_PROMPT = (
     "You are NOVA, a personal voice assistant. You run on a low-spec laptop "
     "and communicate via voice.\n\n"
     "Rules:\n"
@@ -30,8 +30,26 @@ SYSTEM_PROMPT = (
     "- Be helpful, direct, and friendly.\n"
     "- For questions you can't answer, say so briefly rather than making things up.\n"
     "- When the user asks you to perform an action (open browser, volume, etc.) or "
-    "asks about the time/date, use the available tools to fulfill the request."
+    "asks about the time/date, use the available tools to fulfill the request.\n"
+    "- When you use web_search and get results, directly summarize the information "
+    "and answer the question. Do NOT say 'I found some results' or offer to open a "
+    "browser. Just answer concisely from the search results as if you knew it.\n"
+    "- When the user tells you personal information (name, location, preferences), "
+    "use remember_fact to store it. When the user asks if you remember something, "
+    "use recall_facts to check."
 )
+
+
+def _build_system_prompt() -> str:
+    """Build the full system prompt, injecting any stored user facts."""
+    from nova.memory.persistent import get_user_memory
+
+    facts = get_user_memory().get_facts()
+    if not facts:
+        return _BASE_SYSTEM_PROMPT
+
+    facts_str = ", ".join(f"{k}={v}" for k, v in facts.items())
+    return f"{_BASE_SYSTEM_PROMPT}\n\nKnown user facts: {facts_str}"
 
 # Models in order of preference
 _MODELS = ["gemini-2.5-flash", "gemini-2.0-flash-lite"]
@@ -98,7 +116,7 @@ class GeminiProvider(LLMProvider):
             GenerateContentConfig instance.
         """
         return types.GenerateContentConfig(
-            system_instruction=SYSTEM_PROMPT,
+            system_instruction=_build_system_prompt(),
             tools=tools,
         )
 

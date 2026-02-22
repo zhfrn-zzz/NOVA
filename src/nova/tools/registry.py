@@ -8,7 +8,8 @@ import logging
 
 from google.genai import types
 
-from nova.tools import system_control, time_date
+from nova.memory.persistent import recall_facts, remember_fact
+from nova.tools import system_control, time_date, web_search
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +105,68 @@ _FUNCTION_DECLARATIONS = [
             "properties": {},
         },
     ),
+    types.FunctionDeclaration(
+        name="web_search",
+        description=(
+            "Search the web for current information. Use this when the user asks about "
+            "current events, news, weather, recent facts, or anything you don't know or "
+            "that may have changed after your training cutoff. "
+            "Examples: 'siapa presiden Indonesia sekarang', 'cuaca Jakarta hari ini', "
+            "'berita terbaru', 'what happened today', 'latest news'. "
+            "Do NOT use this for time/date queries (use get_current_time instead) or "
+            "for general knowledge you already know."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query to look up on the web.",
+                },
+            },
+            "required": ["query"],
+        },
+    ),
+    types.FunctionDeclaration(
+        name="remember_fact",
+        description=(
+            "Store a fact about the user in persistent memory so you can remember it "
+            "across conversations. Use when the user tells you personal information like "
+            "their name, location, preferences, hobbies, etc. "
+            "Examples: 'nama saya Zhafran', 'I live in Bekasi', 'saya suka kopi', "
+            "'ingat bahwa saya alergi kacang', 'my favorite color is blue'. "
+            "Choose a short descriptive key and store the value."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string",
+                    "description": (
+                        "Short identifier for the fact, e.g. 'name', 'location', "
+                        "'hobby', 'favorite_food', 'allergy'."
+                    ),
+                },
+                "value": {
+                    "type": "string",
+                    "description": "The fact value, e.g. 'Zhafran', 'Bekasi', 'guitar'.",
+                },
+            },
+            "required": ["key", "value"],
+        },
+    ),
+    types.FunctionDeclaration(
+        name="recall_facts",
+        description=(
+            "Retrieve all stored facts about the user from persistent memory. "
+            "Use when the user asks if you remember something about them, asks 'siapa "
+            "nama saya', 'kamu ingat saya?', 'what do you know about me', or similar."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
 ]
 
 # Map function names → async callables
@@ -116,6 +179,9 @@ _TOOL_IMPLEMENTATIONS: dict[str, object] = {
     "open_browser": system_control.open_browser,
     "open_terminal": system_control.open_terminal,
     "lock_screen": system_control.lock_screen,
+    "web_search": web_search.web_search,
+    "remember_fact": remember_fact,
+    "recall_facts": recall_facts,
 }
 
 

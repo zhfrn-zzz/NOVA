@@ -24,6 +24,7 @@ dependencies = [
     "pydantic-settings>=2.0",
     "pynput>=1.7",
     "openwakeword>=0.6",
+    "ddgs>=7.0",
 ]
 
 [project.optional-dependencies]

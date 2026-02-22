@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 _GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 _MODEL = "llama-3.3-70b-versatile"
 
-SYSTEM_PROMPT = (
+_BASE_SYSTEM_PROMPT = (
     "You are NOVA, a personal voice assistant. You run on a low-spec laptop "
     "and communicate via voice.\n\n"
     "Rules:\n"
@@ -35,6 +35,18 @@ SYSTEM_PROMPT = (
 )
 
 
+def _build_system_prompt() -> str:
+    """Build the full system prompt, injecting any stored user facts."""
+    from nova.memory.persistent import get_user_memory
+
+    facts = get_user_memory().get_facts()
+    if not facts:
+        return _BASE_SYSTEM_PROMPT
+
+    facts_str = ", ".join(f"{k}={v}" for k, v in facts.items())
+    return f"{_BASE_SYSTEM_PROMPT}\n\nKnown user facts: {facts_str}"
+
+
 def _build_messages(prompt: str, context: list[dict]) -> list[dict]:
     """Build the messages list for the chat completions API.
 
@@ -45,7 +57,7 @@ def _build_messages(prompt: str, context: list[dict]) -> list[dict]:
     Returns:
         List of message dicts including system prompt.
     """
-    messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages: list[dict] = [{"role": "system", "content": _build_system_prompt()}]
     for turn in context:
         messages.append({"role": turn["role"], "content": turn["content"]})
     messages.append({"role": "user", "content": prompt})

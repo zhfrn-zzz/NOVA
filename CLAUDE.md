@@ -105,6 +105,7 @@ nova/
 │       ├── memory/
 │       │   ├── __init__.py
 │       │   ├── context.py        # Sliding window conversation manager
+│       │   ├── persistent.py     # User facts stored in ~/.nova/memory.json
 │       │   └── cache.py          # SQLite response cache
 │       └── utils/
 │           ├── __init__.py
@@ -138,7 +139,8 @@ nova/
 - [x] Task 13.5: OpenWakeWord integration — always-listening with hey_nova.onnx
 - [x] Task 14: System control tools (Phase 2)
 - [ ] Task 15: Response caching (Phase 2)
-- [ ] Task 16: Web search tool (Phase 2)
+- [x] Task 15.5: Persistent user memory — remember_fact/recall_facts (Phase 2)
+- [x] Task 16: Web search tool (Phase 2)
 - [ ] Task 17: Audio streaming TTS (Phase 2)
 - [ ] Task 18: Systemd service + setup script (Phase 2)
 
