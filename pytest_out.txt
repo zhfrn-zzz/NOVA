@@ -1,0 +1,7 @@
+
+---STDERR---
+ERROR: usage: python.exe -m pytest [options] [file_or_dir] [file_or_dir] [...]
+python.exe -m pytest: error: unrecognized arguments: --tb=long --no-header
+  inifile: C:\Users\Zhafran\Documents\NOVA (Neural-Orchestrated Voice Assistant)\pyproject.toml
+  rootdir: C:\Users\Zhafran\Documents\NOVA (Neural-Orchestrated Voice Assistant)
+

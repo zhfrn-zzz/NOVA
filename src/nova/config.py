@@ -50,6 +50,13 @@ class NovaConfig(BaseSettings):
     wake_word_vad_threshold: float = 0.0
     wake_word_hotkey: str = "<ctrl>+<space>"
 
+    # Clap detection (alternative wake trigger)
+    clap_detection_enabled: bool = True
+    clap_energy_multiplier: float = 15.0
+    clap_min_rms: float = 200.0  # Absolute minimum RMS to count as clap
+    clap_min_gap_ms: int = 200
+    clap_max_gap_ms: int = 600
+
     # System
     log_level: str = "INFO"
     cache_ttl_hours: int = 24

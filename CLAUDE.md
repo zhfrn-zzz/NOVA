@@ -6,7 +6,7 @@ NOVA is a personal AI voice assistant that runs on extremely low-spec hardware (
 
 The pipeline: **Mic → Cloud STT → Cloud LLM → Cloud TTS → Speaker**
 
-Wake word detection uses [openwakeword](https://github.com/dscripka/openWakeWord) with a custom `hey_nova.onnx` model for always-listening activation. Falls back to keyboard hotkey (`Ctrl+Space`) if openwakeword is unavailable.
+Wake word detection uses [openwakeword](https://github.com/dscripka/openWakeWord) with a custom `hey_nova.onnx` model for always-listening activation. A **double-clap detector** runs on the same audio stream as an alternative trigger. Falls back to keyboard hotkey (`Ctrl+Space`) if openwakeword is unavailable.
 
 ## Hardware Constraints (CRITICAL — read before every implementation decision)
 
@@ -76,6 +76,7 @@ nova/
 │       ├── audio/
 │       │   ├── __init__.py
 │       │   ├── capture.py        # Mic input + VAD
+│       │   ├── clap_detector.py  # Double-clap wake trigger (alternative)
 │       │   ├── playback.py       # Speaker output (mpv)
 │       │   ├── streaming_tts.py  # Split-and-stream TTS for low latency
 │       │   ├── wake_word.py      # Hotkey fallback detector (Ctrl+Space)
@@ -166,6 +167,7 @@ nova/
 - [x] Task 26: Google Cloud TTS — Chirp 3 HD as primary TTS with quota circuit breaker (Phase 2)
 - [x] Task 27: System prompt time injection — Indonesian datetime appended on every LLM call (Phase 2)
 - [x] Task 28: TTS sentence merge fix — 40-char threshold to reduce API calls and speech pauses (Phase 2)
+- [x] Task 29: Double-clap detection — alternative wake trigger on same audio stream (Phase 2)
 
 ## Important Notes
 

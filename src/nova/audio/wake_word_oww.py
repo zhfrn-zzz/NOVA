@@ -28,6 +28,9 @@ class OpenWakeWordDetector:
     thread, feeding each frame to openwakeword for prediction.  When the
     score exceeds the configured threshold, an asyncio Event is set and
     an activation beep is played.
+
+    Optionally runs a ClapDetector on the same audio stream so that a
+    double-clap gesture can also trigger activation.
     """
 
     def __init__(self) -> None:
@@ -46,6 +49,22 @@ class OpenWakeWordDetector:
         # Cooldown: ignore predictions for N frames after activation
         self._cooldown_frames = 0
         self._cooldown_total = 20  # ~1.6s at 80ms/frame
+
+        # Optional clap detector (runs on same audio frames)
+        self._clap_detector = None
+        if config.clap_detection_enabled:
+            from nova.audio.clap_detector import ClapDetector
+
+            self._clap_detector = ClapDetector(
+                energy_multiplier=config.clap_energy_multiplier,
+                min_rms=config.clap_min_rms,
+                min_gap_ms=config.clap_min_gap_ms,
+                max_gap_ms=config.clap_max_gap_ms,
+            )
+            logger.info("Clap detection enabled (multiplier=%.1f, gap=%d-%dms)",
+                        config.clap_energy_multiplier,
+                        config.clap_min_gap_ms,
+                        config.clap_max_gap_ms)
 
     def _load_model(self) -> None:
         """Load the openwakeword model from disk."""
@@ -121,32 +140,43 @@ class OpenWakeWordDetector:
 
             # Flatten to 1-D int16 array
             audio_frame = audio[:, 0]
+            triggered = False
 
-            # Run prediction
-            try:
-                prediction = self._model.predict(audio_frame)
-            except Exception:
-                logger.debug("OpenWakeWord predict error", exc_info=True)
-                continue
+            # --- Double-clap detection (runs first, lightweight) ---
+            if self._clap_detector is not None:
+                if self._clap_detector.process_frame(audio_frame):
+                    logger.info("Double clap detected!")
+                    triggered = True
 
-            # Check if any model score exceeds threshold
-            for model_name, score in prediction.items():
-                if score > self._threshold:
-                    logger.info(
-                        "Wake word detected! model=%s score=%.3f",
-                        model_name,
-                        score,
-                    )
-                    # Enter cooldown to prevent rapid re-triggering
-                    self._cooldown_frames = self._cooldown_total
-                    # Reset prediction buffer
-                    self._model.reset()
+            # --- OpenWakeWord prediction ---
+            if not triggered:
+                try:
+                    prediction = self._model.predict(audio_frame)
+                except Exception:
+                    logger.debug("OpenWakeWord predict error", exc_info=True)
+                    continue
 
-                    # Signal the event loop
-                    with self._lock:
-                        if self._loop and self._event:
-                            self._loop.call_soon_threadsafe(self._event.set)
-                    break
+                for model_name, score in prediction.items():
+                    if score > self._threshold:
+                        logger.info(
+                            "Wake word detected! model=%s score=%.3f",
+                            model_name,
+                            score,
+                        )
+                        triggered = True
+                        # Reset prediction buffer
+                        self._model.reset()
+                        break
+
+            # --- Trigger activation ---
+            if triggered:
+                self._cooldown_frames = self._cooldown_total
+                if self._clap_detector is not None:
+                    self._clap_detector.reset()
+                # Signal the event loop
+                with self._lock:
+                    if self._loop and self._event:
+                        self._loop.call_soon_threadsafe(self._event.set)
 
     async def wait_for_activation(self) -> None:
         """Wait until the wake word is detected.
