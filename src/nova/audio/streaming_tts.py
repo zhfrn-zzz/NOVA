@@ -78,18 +78,18 @@ def split_sentences(text: str) -> list[str]:
                     continue
 
             # Buffer is a real sentence — flush it if it's long enough
-            if len(buffer) >= 10:
+            if len(buffer) >= 40:
                 sentences.append(buffer)
                 buffer = part
             else:
-                # Too short — merge with this part
+                # Too short (< 40 chars) — merge with next for natural speech
                 buffer = buffer + " " + part
         else:
             buffer = part
 
     # Flush remaining buffer
     if buffer:
-        if sentences and len(buffer) < 10:
+        if sentences and len(buffer) < 40:
             # Very short trailing fragment — merge with last sentence
             sentences[-1] = sentences[-1] + " " + buffer
         else:

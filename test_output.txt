@@ -1,0 +1,28 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.14.3, pytest-9.0.2, pluggy-1.6.0 -- C:\Users\Zhafran\AppData\Local\Programs\Python\Python314\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\Zhafran\Documents\NOVA (Neural-Orchestrated Voice Assistant)
+configfile: pyproject.toml
+plugins: anyio-4.12.1, asyncio-1.3.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 17 items
+
+tests/test_streaming_tts.py::TestSplitSentences::test_empty_string PASSED [  5%]
+tests/test_streaming_tts.py::TestSplitSentences::test_single_sentence_no_period PASSED [ 11%]
+tests/test_streaming_tts.py::TestSplitSentences::test_single_sentence_with_period PASSED [ 17%]
+tests/test_streaming_tts.py::TestSplitSentences::test_two_short_sentences_merged PASSED [ 23%]
+tests/test_streaming_tts.py::TestSplitSentences::test_exclamation_and_question PASSED [ 29%]
+tests/test_streaming_tts.py::TestSplitSentences::test_abbreviation_not_split PASSED [ 35%]
+tests/test_streaming_tts.py::TestSplitSentences::test_dll_abbreviation PASSED [ 41%]
+tests/test_streaming_tts.py::TestSplitSentences::test_short_fragment_merged PASSED [ 47%]
+tests/test_streaming_tts.py::TestSplitSentences::test_multiple_long_sentences PASSED [ 52%]
+tests/test_streaming_tts.py::TestSplitSentences::test_preserves_content PASSED [ 58%]
+tests/test_streaming_tts.py::TestSplitSentences::test_whitespace_only PASSED [ 64%]
+tests/test_streaming_tts.py::TestSplitSentences::test_decimal_number_not_split PASSED [ 70%]
+tests/test_streaming_tts.py::TestSplitSentences::test_short_sentences_merged_under_40 PASSED [ 76%]
+tests/test_streaming_tts.py::TestStreamingTTSPlayer::test_empty_text_returns_zero PASSED [ 82%]
+tests/test_streaming_tts.py::TestStreamingTTSPlayer::test_single_sentence_calls_tts_once PASSED [ 88%]
+tests/test_streaming_tts.py::TestStreamingTTSPlayer::test_multi_sentence_calls_tts_per_sentence PASSED [ 94%]
+tests/test_streaming_tts.py::TestStreamingTTSPlayer::test_synthesis_failure_skips_sentence PASSED [100%]
+
+============================= 17 passed in 0.09s ==============================

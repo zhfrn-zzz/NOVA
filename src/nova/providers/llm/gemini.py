@@ -54,16 +54,36 @@ _BASE_SYSTEM_PROMPT = (
 )
 
 
+_HARI = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
+_BULAN = [
+    "", "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+    "Juli", "Agustus", "September", "Oktober", "November", "Desember",
+]
+
+
 def _build_system_prompt() -> str:
-    """Build the full system prompt, injecting any stored user facts."""
+    """Build the full system prompt, injecting current time and user facts.
+
+    Appends the current datetime in Indonesian format so the model always
+    knows the time context (no need to call get_current_time tool).
+    """
+    import datetime
+
+    now = datetime.datetime.now()
+    time_str = (
+        f"Sekarang: {now.strftime('%H:%M')}, "
+        f"{_HARI[now.weekday()]}, "
+        f"{now.day} {_BULAN[now.month]} {now.year}"
+    )
+
     from nova.memory.persistent import get_user_memory
 
     facts = get_user_memory().get_facts()
-    if not facts:
-        return _BASE_SYSTEM_PROMPT
-
-    facts_str = ", ".join(f"{k}={v}" for k, v in facts.items())
-    return f"{_BASE_SYSTEM_PROMPT}\n\nKnown user facts: {facts_str}"
+    prompt = f"{_BASE_SYSTEM_PROMPT}\n\n{time_str}"
+    if facts:
+        facts_str = ", ".join(f"{k}={v}" for k, v in facts.items())
+        prompt += f"\nKnown user facts: {facts_str}"
+    return prompt
 
 # Models in order of preference
 _MODELS = ["gemini-2.5-flash", "gemini-2.0-flash-lite"]

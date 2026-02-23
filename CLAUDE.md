@@ -164,6 +164,8 @@ nova/
 - [x] Task 24: Network control — Wi-Fi on/off/status (Phase 2)
 - [x] Task 25: Music playback — play songs via yt-dlp + YouTube Music, media key controls (Phase 2)
 - [x] Task 26: Google Cloud TTS — Chirp 3 HD as primary TTS with quota circuit breaker (Phase 2)
+- [x] Task 27: System prompt time injection — Indonesian datetime appended on every LLM call (Phase 2)
+- [x] Task 28: TTS sentence merge fix — 40-char threshold to reduce API calls and speech pauses (Phase 2)
 
 ## Important Notes
 

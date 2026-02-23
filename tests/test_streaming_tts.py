@@ -17,18 +17,20 @@ class TestSplitSentences:
     def test_single_sentence_with_period(self):
         assert split_sentences("Halo saya Nova.") == ["Halo saya Nova."]
 
-    def test_two_sentences(self):
+    def test_two_short_sentences_merged(self):
+        # Both sentences are < 40 chars, so they get merged into one
         result = split_sentences("Halo saya Nova. Saya bisa membantu Anda.")
-        assert len(result) == 2
-        assert result[0] == "Halo saya Nova."
-        assert result[1] == "Saya bisa membantu Anda."
+        assert len(result) == 1
+        assert "Halo saya Nova." in result[0]
+        assert "Saya bisa membantu Anda." in result[0]
 
     def test_exclamation_and_question(self):
         result = split_sentences("Halo! Apa kabar? Saya baik.")
-        # "Halo!" is <10 chars so gets merged with "Apa kabar?" → 2 sentences
-        assert len(result) == 2
+        # All fragments are < 40 chars — everything merges into one
+        assert len(result) == 1
         assert "Halo!" in result[0]
         assert "Apa kabar?" in result[0]
+        assert "Saya baik." in result[0]
 
     def test_abbreviation_not_split(self):
         result = split_sentences("Dr. Budi mengatakan hal penting.")
@@ -40,8 +42,9 @@ class TestSplitSentences:
         result = split_sentences(
             "Ada buku, pensil, dll. yang perlu dibeli. Jangan lupa."
         )
-        # "dll." should NOT be a sentence break
-        assert len(result) == 2
+        # "dll." should NOT be a sentence break, and total < 40 chars per part
+        # so everything merges into one
+        assert len(result) == 1
         assert "dll." in result[0]
 
     def test_short_fragment_merged(self):
@@ -57,7 +60,11 @@ class TestSplitSentences:
             "Diperkirakan penuh dalam satu jam."
         )
         result = split_sentences(text)
-        assert len(result) == 3
+        # Each sentence is ~35 chars (< 40), so first merges with second (now > 40),
+        # but the merge logic keeps accumulating into the buffer.
+        # The buffer after first two merges is > 70 chars, so third merges as
+        # trailing fragment (< 40 chars). Result: 1 sentence.
+        assert len(result) == 1
 
     def test_preserves_content(self):
         text = "Halo! Saya Nova. Senang berkenalan!"
@@ -72,9 +79,19 @@ class TestSplitSentences:
 
     def test_decimal_number_not_split(self):
         result = split_sentences("Harganya 3.500 rupiah. Cukup murah.")
-        # "3.500" should NOT cause a split — "3." ends with digit+period
-        assert len(result) == 2
+        # "3.500" should NOT cause a split, and both parts are < 40 chars
+        # so they merge into one
+        assert len(result) == 1
         assert "3.500" in result[0]
+
+    def test_short_sentences_merged_under_40(self):
+        """Short sentences (< 40 chars) merge to reduce TTS API calls."""
+        result = split_sentences(
+            "Mohon maaf, Tuan. Anda benar, ini sudah sore."
+        )
+        # Both fragments are < 40 chars → merged into one
+        assert len(result) == 1
+        assert result[0] == "Mohon maaf, Tuan. Anda benar, ini sudah sore."
 
 
 class TestStreamingTTSPlayer:
@@ -108,14 +125,16 @@ class TestStreamingTTSPlayer:
         mock_router = AsyncMock()
         mock_router.execute.return_value = b"fake-audio-bytes"
 
+        # Use long sentences (>= 40 chars each) so they don't merge
         with patch("nova.audio.streaming_tts.play_audio", new_callable=AsyncMock):
             result = await player.synthesize_and_play(
-                "Halo saya Nova. Saya bisa membantu Anda.",
+                "Baterai laptop Anda saat ini sedang terisi penuh. "
+                "Sedang mengisi daya melalui kabel USB yang terhubung.",
                 mock_router, "id",
             )
 
         assert result > 0.0
-        # Should have been called twice (two sentences)
+        # Both sentences are >= 40 chars, so they stay separate → 2 TTS calls
         assert mock_router.execute.call_count == 2
 
     @pytest.mark.asyncio
@@ -128,11 +147,13 @@ class TestStreamingTTSPlayer:
             b"fake-audio-bytes",
         ]
 
+        # Use long sentences (>= 40 chars) so they don't merge
         with patch(
             "nova.audio.streaming_tts.play_audio", new_callable=AsyncMock,
         ) as mock_play:
             await player.synthesize_and_play(
-                "Kalimat satu gagal. Kalimat dua berhasil.",
+                "Kalimat pertama ini akan mengalami kegagalan. "
+                "Kalimat kedua ini berhasil disintesis dengan baik.",
                 mock_router, "id",
             )
 

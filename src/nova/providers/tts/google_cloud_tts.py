@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 
 # Voice mapping: Chirp 3 HD voices
 _VOICES = {
-    "id": {"voice_name": "id-ID-Chirp3-HD-Orus", "language_code": "id-ID"},
-    "en": {"voice_name": "en-US-Chirp3-HD-Orus", "language_code": "en-US"},
+    "id": {"voice_name": "id-ID-Chirp3-HD-Algenib", "language_code": "id-ID"},
+    "en": {"voice_name": "en-US-Chirp3-HD-Algenib", "language_code": "en-US"},
 }
 
 
