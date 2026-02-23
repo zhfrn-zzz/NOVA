@@ -168,6 +168,7 @@ nova/
 - [x] Task 27: System prompt time injection — Indonesian datetime appended on every LLM call (Phase 2)
 - [x] Task 28: TTS sentence merge fix — 40-char threshold to reduce API calls and speech pauses (Phase 2)
 - [x] Task 29: Double-clap detection — alternative wake trigger on same audio stream (Phase 2)
+- [x] Task 30: Whisper hallucination filter — RMS energy gate, no_speech_prob filter, phrase blocklist (Phase 2)
 
 ## Important Notes
 
