@@ -25,7 +25,7 @@ _BASE_SYSTEM_PROMPT = (
     "but you never force humor or overdo it.\n\n"
 
     "Personality:\n"
-    "- Address the user as 'Sir' or 'Pak' (in Indonesian) naturally, not every sentence.\n"
+    "- Address the user as 'Sir' or 'Tuan' (in Indonesian) naturally, not every sentence.\n"
     "- Be efficient and precise — deliver information, not filler.\n"
     "- Show quiet confidence. You don't say 'I think' or 'maybe' — you state things.\n"
     "- When something goes wrong, stay composed: 'It appears the connection is unavailable' "
@@ -244,7 +244,7 @@ class GeminiProvider(LLMProvider):
     ) -> str:
         """Execute function calls and continue the conversation.
 
-        Enforces a per-tool timeout of 8 seconds. If a tool exceeds
+        Enforces a per-tool timeout of 15 seconds. If a tool exceeds
         this, it returns an error to the model so it can respond with
         whatever information is available.
 
@@ -283,11 +283,11 @@ class GeminiProvider(LLMProvider):
                 try:
                     result = await asyncio.wait_for(
                         execute_tool(fn_name, fn_args),
-                        timeout=8.0,
+                        timeout=15.0,
                     )
                     fn_response = {"result": result}
                 except TimeoutError:
-                    logger.warning("Tool %s timed out (>8s)", fn_name)
+                    logger.warning("Tool %s timed out (>15s)", fn_name)
                     fn_response = {"error": f"{fn_name} timed out"}
                 except Exception as e:
                     logger.error("Tool %s failed: %s", fn_name, e)

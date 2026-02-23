@@ -41,8 +41,9 @@ Wake word detection uses [openwakeword](https://github.com/dscripka/openWakeWord
 4. **OpenRouter** (various free models) — last resort
 
 ### TTS (Text-to-Speech)
-1. **Edge TTS** (edge-tts lib) — unlimited, no API key, very natural
-2. **Cloudflare Workers AI** — fallback
+1. **Google Cloud TTS** (Chirp 3 HD) — primary, 950K chars/month free tier, circuit breaker
+2. **Edge TTS** (edge-tts lib) — unlimited, no API key, very natural
+3. **Cloudflare Workers AI** — fallback
 
 ## Code Conventions
 
@@ -96,6 +97,7 @@ nova/
 │       │   │   └── openrouter.py
 │       │   └── tts/
 │       │       ├── __init__.py
+│       │       ├── google_cloud_tts.py  # Google Cloud TTS (Chirp 3 HD, primary)
 │       │       ├── edge_tts_provider.py
 │       │       └── cloudflare_tts.py
 │       ├── tools/
@@ -109,6 +111,7 @@ nova/
 │       │   ├── display_control.py # Brightness up/down/get (screen-brightness-control)
 │       │   ├── network_control.py # Wi-Fi on/off/status (netsh/nmcli)
 │       │   ├── web_search.py     # DuckDuckGo / SearXNG
+│       │   ├── music_player.py   # YouTube Music playback via yt-dlp + media keys
 │       │   └── time_date.py      # Local time/date
 │       ├── memory/
 │       │   ├── __init__.py
@@ -118,7 +121,8 @@ nova/
 │       └── utils/
 │           ├── __init__.py
 │           ├── logger.py
-│           └── audio_utils.py
+│           ├── audio_utils.py
+│           └── tts_quota.py          # Google TTS monthly quota tracker
 ├── tests/
 │   ├── test_orchestrator.py
 │   ├── test_providers.py
@@ -158,6 +162,8 @@ nova/
 - [x] Task 22: Dictation — type text into active window (Phase 2)
 - [x] Task 23: Display brightness control — up/down/get (Phase 2)
 - [x] Task 24: Network control — Wi-Fi on/off/status (Phase 2)
+- [x] Task 25: Music playback — play songs via yt-dlp + YouTube Music, media key controls (Phase 2)
+- [x] Task 26: Google Cloud TTS — Chirp 3 HD as primary TTS with quota circuit breaker (Phase 2)
 
 ## Important Notes
 

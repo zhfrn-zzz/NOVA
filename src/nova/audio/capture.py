@@ -117,7 +117,12 @@ class AudioCapture:
         # Pad short clips with silence to reach minimum duration
         min_samples = int(self.min_recording_seconds * self.sample_rate)
         if len(audio_data) < min_samples:
-            padding = np.zeros(min_samples - len(audio_data), dtype=audio_data.dtype)
+            pad_len = min_samples - len(audio_data)
+            padding = np.zeros_like(audio_data[:pad_len])
+            if padding.shape[0] < pad_len:
+                # Create padding matching audio_data shape (handles 2D arrays from sounddevice)
+                pad_shape = (pad_len,) + audio_data.shape[1:]
+                padding = np.zeros(pad_shape, dtype=audio_data.dtype)
             audio_data = np.concatenate([audio_data, padding])
             logger.info(
                 "AudioCapture: padded %.1fs → %.1fs (min duration)",

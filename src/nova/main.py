@@ -44,6 +44,11 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Check connectivity to all providers, mic, and audio player",
     )
+    parser.add_argument(
+        "--quota",
+        action="store_true",
+        help="Show Google Cloud TTS quota usage for the current month",
+    )
     return parser.parse_args()
 
 
@@ -86,6 +91,30 @@ async def _run_check() -> None:
     except ImportError:
         console.print("  [yellow]⚠️[/] wake_word: openwakeword not installed (hotkey fallback)")
 
+    # Check Google Cloud TTS quota status
+    try:
+        from nova.providers.tts.google_cloud_tts import GoogleCloudTTSProvider
+
+        gcp_tts = GoogleCloudTTSProvider()
+        status = gcp_tts.get_quota_status()
+        if status["configured"]:
+            remaining = status["remaining"]
+            if remaining > 1000:
+                console.print(
+                    f"  [green]✅[/] google_cloud_tts: connected "
+                    f"({status['chars_used']:,} / {status['limit']:,} chars used)"
+                )
+            else:
+                console.print(
+                    f"  [yellow]⚠️[/] google_cloud_tts: quota exceeded "
+                    f"({status['chars_used']:,} / {status['limit']:,} chars used)"
+                )
+                all_ok = False
+        else:
+            console.print("  [dim]ℹ️[/]  google_cloud_tts: not configured")
+    except Exception:
+        console.print("  [dim]ℹ️[/]  google_cloud_tts: not configured")
+
     console.print()
     if all_ok:
         console.print("[bold green]All systems operational.[/]\n")
@@ -94,6 +123,54 @@ async def _run_check() -> None:
             "[bold yellow]Some components unavailable"
             " — NOVA may have reduced functionality.[/]\n"
         )
+
+
+def _run_quota() -> None:
+    """Display Google Cloud TTS quota usage for the current month."""
+    console.print("\n[bold]Google Cloud TTS Quota[/]\n")
+
+    try:
+        from nova.providers.tts.google_cloud_tts import GoogleCloudTTSProvider
+
+        provider = GoogleCloudTTSProvider()
+        status = provider.get_quota_status()
+
+        if not status["configured"]:
+            console.print(
+                "  [dim]Google Cloud TTS is not configured.[/]\n"
+                "  Set NOVA_GOOGLE_CLOUD_TTS_KEY_PATH in .env to enable.\n"
+            )
+            return
+
+        # Parse month string (e.g. "2026-02") to human-readable
+        month_str = status["month"]
+        try:
+            from datetime import datetime
+            month_dt = datetime.strptime(month_str, "%Y-%m")
+            month_display = month_dt.strftime("%B %Y")
+        except (ValueError, TypeError):
+            month_display = month_str
+
+        chars_used = status["chars_used"]
+        limit = status["limit"]
+        remaining = status["remaining"]
+        pct = (chars_used / limit * 100) if limit > 0 else 0
+
+        if remaining > 1000:
+            color = "green"
+        elif remaining > 0:
+            color = "yellow"
+        else:
+            color = "red"
+
+        console.print(
+            f"  [{color}]Google Cloud TTS: {chars_used:,} / {limit:,} "
+            f"characters used ({month_display})[/]"
+        )
+        console.print(f"  Remaining: {remaining:,} characters ({100 - pct:.1f}%)\n")
+
+    except Exception as e:
+        console.print(f"  [red]Error reading quota: {e}[/]\n")
 
 
 async def _text_mode(orchestrator) -> None:
@@ -360,6 +437,11 @@ async def _async_main() -> None:
     # --check mode: test all providers and exit
     if args.check:
         await _run_check()
+        return
+
+    # --quota mode: show Google TTS quota and exit
+    if args.quota:
+        _run_quota()
         return
 
     try:

@@ -9,6 +9,7 @@ Supports two response paths:
 
 import asyncio
 import logging
+import os
 import re
 import shutil
 import time
@@ -23,6 +24,7 @@ from nova.providers.router import ProviderRouter
 from nova.providers.stt.groq_whisper import GroqWhisperProvider
 from nova.providers.tts.cloudflare_tts import CloudflareTTSProvider
 from nova.providers.tts.edge_tts_provider import EdgeTTSProvider, detect_language
+from nova.providers.tts.google_cloud_tts import GoogleCloudTTSProvider
 from nova.tools.registry import get_tool_declarations
 
 logger = logging.getLogger(__name__)
@@ -48,7 +50,9 @@ _TOOL_KEYWORDS = {
     # Memory
     "ingat", "remember", "lupakan", "forget",
     # Media
-    "play", "pause", "next", "previous",
+    "play", "pause", "next", "previous", "stop",
+    # Music
+    "putar", "puterin", "lagu", "musik", "music", "song", "skip",
     # Dictation
     "ketik", "dictate",
 }
@@ -74,8 +78,13 @@ class Orchestrator:
             # At least need one — will fail at runtime with clear error
             llm_providers.append(GeminiProvider())
 
-        # TTS providers: Edge TTS (primary), Cloudflare (fallback, if configured)
-        tts_providers: list = [EdgeTTSProvider()]
+        # TTS providers: Google Cloud TTS (primary, if configured),
+        # Edge TTS (default), Cloudflare (fallback)
+        tts_providers: list = []
+        gcp_key = os.path.expanduser(config.google_cloud_tts_key_path)
+        if gcp_key and os.path.isfile(gcp_key):
+            tts_providers.append(GoogleCloudTTSProvider())
+        tts_providers.append(EdgeTTSProvider())
         if config.cloudflare_account_id and config.cloudflare_api_token:
             tts_providers.append(CloudflareTTSProvider())
 

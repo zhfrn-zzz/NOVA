@@ -12,6 +12,7 @@ from nova.memory.persistent import recall_facts, remember_fact
 from nova.tools import (
     dictation,
     display_control,
+    music_player,
     network_control,
     notes,
     reminders,
@@ -568,6 +569,76 @@ _FUNCTION_DECLARATIONS = [
             "properties": {},
         },
     ),
+    # ── Music Playback ───────────────────────────────────────────────
+    types.FunctionDeclaration(
+        name="play_music",
+        description=(
+            "Search and play a song on YouTube Music. Use when the user says "
+            "'puterin lagu', 'play song', 'putar musik', 'play music', "
+            "'nyalakan lagu', 'mainkan lagu', or mentions a song/artist to play. "
+            "Examples: 'puterin About You dari The 1975', 'play Bohemian Rhapsody', "
+            "'putar lagu Sheila On 7'. Build the query from song title and artist."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "Song search query combining title and artist, "
+                        "e.g. 'About You The 1975', 'Bohemian Rhapsody Queen'."
+                    ),
+                },
+            },
+            "required": ["query"],
+        },
+    ),
+    types.FunctionDeclaration(
+        name="pause_resume_music",
+        description=(
+            "Toggle play/pause on the currently playing music. Use when the user says "
+            "'pause musik', 'resume musik', 'pause lagu', 'lanjutkan musik', "
+            "'pause', 'resume', 'play', or similar while music is playing."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    types.FunctionDeclaration(
+        name="skip_track",
+        description=(
+            "Skip to the next song/track. Use when the user says "
+            "'skip', 'next song', 'lagu selanjutnya', 'ganti lagu', "
+            "'next', 'skip lagu', or similar."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    types.FunctionDeclaration(
+        name="previous_music_track",
+        description=(
+            "Go back to the previous song/track. Use when the user says "
+            "'lagu sebelumnya', 'previous song', 'balik lagu', 'back', or similar."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    types.FunctionDeclaration(
+        name="stop_music",
+        description=(
+            "Stop the currently playing music. Use when the user says "
+            "'stop musik', 'hentikan musik', 'stop lagu', 'matikan musik', or similar."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
 ]
 
 # Map function names → async callables
@@ -625,6 +696,12 @@ _TOOL_IMPLEMENTATIONS: dict[str, object] = {
     "wifi_on": network_control.wifi_on,
     "wifi_off": network_control.wifi_off,
     "get_wifi_status": network_control.get_wifi_status,
+    # Music Playback
+    "play_music": music_player.play_music,
+    "pause_resume_music": music_player.pause_resume_music,
+    "skip_track": music_player.skip_track,
+    "previous_music_track": music_player.previous_music_track,
+    "stop_music": music_player.stop_music,
 }
 
 

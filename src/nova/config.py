@@ -18,6 +18,10 @@ class NovaConfig(BaseSettings):
     cloudflare_account_id: str = ""
     cloudflare_api_token: str = ""
 
+    # Google Cloud TTS
+    google_cloud_tts_key_path: str = ""  # Path to service account JSON
+    google_tts_monthly_quota: int = 950_000  # Free-tier character limit
+
     # Audio
     sample_rate: int = 16000
     channels: int = 1
