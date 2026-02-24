@@ -3,6 +3,9 @@
 Analyzes raw int16 audio frames (shared with the OpenWakeWord reader loop)
 to detect two sharp transient spikes separated by a configurable gap.  No
 extra threads, no extra audio streams — pure frame-by-frame computation.
+
+v2: Added transient validation — spikes must drop within 1-2 frames,
+    rejecting sustained sounds (voice "eeee", humming, etc.).
 """
 
 import collections
@@ -25,6 +28,11 @@ _AMBIENT_WINDOW = int(2.0 / _FRAME_DURATION_S)  # 25 frames
 # Cooldown after trigger: ~2 seconds
 _COOLDOWN_FRAMES = int(2.0 / _FRAME_DURATION_S)  # 25 frames
 
+# A real clap spike should drop back below this fraction of spike RMS
+# within _MAX_SPIKE_SUSTAIN frames. Voice stays high → rejected.
+_MAX_SPIKE_SUSTAIN = 2  # max consecutive high frames (~160ms)
+_DROP_RATIO = 0.4  # frame RMS must drop below 40% of spike RMS
+
 
 class ClapDetector:
     """Detects double-clap patterns in audio frames.
@@ -35,10 +43,12 @@ class ClapDetector:
     Detection logic:
         1. Calculate frame RMS energy.
         2. Maintain rolling ambient RMS over ~2 seconds.
-        3. Spike = RMS > ambient * energy_multiplier (single frame ≤80ms).
-        4. After first spike, wait for second spike within min–max gap.
-        5. Two spikes in window → trigger.
-        6. 2-second cooldown after trigger.
+        3. Spike candidate = RMS > ambient * energy_multiplier.
+        4. Validate transient: energy must drop within 1-2 frames.
+           (Rejects sustained sounds like voice, humming, music.)
+        5. After first validated clap, wait for second within min–max gap.
+        6. Two validated claps in window → trigger.
+        7. 2-second cooldown after trigger.
     """
 
     def __init__(
@@ -63,6 +73,14 @@ class ClapDetector:
         self._first_clap_time: float | None = None
         self._cooldown_remaining: int = 0
 
+        # Transient validation state
+        self._pending_spike: bool = False  # waiting to validate a spike
+        self._pending_spike_rms: float = 0.0  # RMS of the spike frame
+        self._pending_spike_time: float = 0.0
+        self._sustain_count: int = 0  # frames still high after spike
+        self._pending_is_second: bool = False  # is this validating 2nd clap?
+        self._pending_gap: float = 0.0  # gap for 2nd clap logging
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -82,8 +100,6 @@ class ClapDetector:
             return False
 
         rms = self._compute_rms(audio_frame)
-
-        # Update ambient noise level
         is_spike = self._is_spike(rms)
 
         # Only include non-spike frames in ambient baseline
@@ -91,33 +107,88 @@ class ClapDetector:
             self._ambient_history.append(rms)
             self._ambient_rms = self._rolling_mean()
 
-        # State machine: waiting for first or second clap
         now = time.monotonic()
 
+        # ── Transient validation: check if pending spike dropped ──
+        if self._pending_spike:
+            still_high = rms > self._pending_spike_rms * _DROP_RATIO
+            if still_high:
+                self._sustain_count += 1
+                if self._sustain_count > _MAX_SPIKE_SUSTAIN:
+                    # Sustained sound (voice, hum) — reject
+                    logger.debug(
+                        "Spike rejected: sustained %d frames (rms=%.1f, "
+                        "spike_rms=%.1f) — likely voice, not clap",
+                        self._sustain_count,
+                        rms,
+                        self._pending_spike_rms,
+                    )
+                    self._pending_spike = False
+                    # If this was supposed to be the first clap, clear it
+                    if not self._pending_is_second:
+                        self._first_clap_time = None
+                    return False
+            else:
+                # Energy dropped fast → confirmed clap!
+                logger.debug(
+                    "Spike confirmed as clap (drop after %d frames, "
+                    "spike_rms=%.1f → current_rms=%.1f)",
+                    self._sustain_count,
+                    self._pending_spike_rms,
+                    rms,
+                )
+                self._pending_spike = False
+
+                if self._pending_is_second:
+                    # Second clap validated → trigger!
+                    self._first_clap_time = None
+                    self._cooldown_remaining = _COOLDOWN_FRAMES
+                    logger.info(
+                        "Double clap detected! (gap=%.0fms, rms=%.1f, "
+                        "ambient=%.1f)",
+                        self._pending_gap * 1000,
+                        self._pending_spike_rms,
+                        self._ambient_rms,
+                    )
+                    return True
+                # else: first clap confirmed, wait for second
+
+            # Don't process new spikes while validating
+            return False
+
+        # ── Check for gap timeout on first clap ──
         if self._first_clap_time is not None:
             elapsed = now - self._first_clap_time
-
             if elapsed > self._max_gap_s:
-                # Window expired — reset
                 self._first_clap_time = None
 
             elif is_spike and elapsed >= self._min_gap_s:
-                # Second clap in window → trigger!
-                self._first_clap_time = None
-                self._cooldown_remaining = _COOLDOWN_FRAMES
-                logger.info(
-                    "Double clap detected! (gap=%.0fms, rms=%.1f, ambient=%.1f)",
-                    elapsed * 1000,
+                # Second clap candidate — start transient validation
+                self._pending_spike = True
+                self._pending_spike_rms = rms
+                self._pending_spike_time = now
+                self._sustain_count = 0
+                self._pending_is_second = True
+                self._pending_gap = elapsed
+                logger.debug(
+                    "Second clap candidate (rms=%.1f, gap=%.0fms) "
+                    "— validating transient…",
                     rms,
-                    self._ambient_rms,
+                    elapsed * 1000,
                 )
-                return True
+                return False
 
         elif is_spike:
-            # First clap
+            # First clap candidate — start transient validation
             self._first_clap_time = now
+            self._pending_spike = True
+            self._pending_spike_rms = rms
+            self._pending_spike_time = now
+            self._sustain_count = 0
+            self._pending_is_second = False
             logger.debug(
-                "First clap candidate (rms=%.1f, ambient=%.1f, threshold=%.1f)",
+                "First clap candidate (rms=%.1f, ambient=%.1f, "
+                "threshold=%.1f) — validating transient…",
                 rms,
                 self._ambient_rms,
                 self._ambient_rms * self._energy_multiplier,
@@ -129,6 +200,7 @@ class ClapDetector:
         """Reset internal state (e.g. after activation)."""
         self._first_clap_time = None
         self._cooldown_remaining = _COOLDOWN_FRAMES
+        self._pending_spike = False
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -147,11 +219,9 @@ class ClapDetector:
             1. RMS > ambient * multiplier (relative to background)
             2. RMS > min_rms (absolute floor — filters keyboard, etc.)
         """
-        # Absolute floor — keyboard typing (~36 RMS) never passes
         if rms < self._min_rms:
             return False
         if self._ambient_rms < 1.0:
-            # Not enough ambient data yet — absolute check is enough
             return True
         return rms > self._ambient_rms * self._energy_multiplier
 

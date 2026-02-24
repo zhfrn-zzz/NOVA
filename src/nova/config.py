@@ -42,7 +42,7 @@ class NovaConfig(BaseSettings):
     # Conversation
     max_context_turns: int = 10
     default_language: str = "auto"
-    stt_language: str = "id"  # Hint for Whisper ("id", "en", or "auto")
+    stt_language: str = "auto"  # Hint for Whisper ("id", "en", or "auto")
 
     # Wake word / hotkey
     wake_word_model_path: str = "models/hey_nova.onnx"
