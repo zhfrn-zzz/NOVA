@@ -8,7 +8,14 @@ import logging
 
 from google.genai import types
 
-from nova.memory.persistent import recall_facts, remember_fact
+from nova.memory.persistent import (
+    memory_forget,
+    memory_search,
+    memory_store,
+    recall_facts,
+    remember_fact,
+    update_user_profile,
+)
 from nova.tools import (
     dictation,
     display_control,
@@ -315,15 +322,14 @@ _FUNCTION_DECLARATIONS = [
             "required": ["query"],
         },
     ),
-    # ── User Memory ──────────────────────────────────────────────────
+    # ── User Memory ──────────────────────────────────────────────────────────
     types.FunctionDeclaration(
-        name="remember_fact",
+        name="memory_store",
         description=(
-            "Store a fact about the user in persistent memory so you can remember it "
-            "across conversations. Use when the user tells you personal information like "
+            "Store a fact about the user in persistent memory. "
+            "Use when the user tells you personal information like "
             "their name, location, preferences, hobbies, etc. "
-            "Examples: 'nama saya Zhafran', 'I live in Bekasi', 'saya suka kopi', "
-            "'ingat bahwa saya alergi kacang', 'my favorite color is blue'. "
+            "Examples: 'nama saya Zhafran', 'I live in Bekasi'. "
             "Choose a short descriptive key and store the value."
         ),
         parameters_json_schema={
@@ -332,28 +338,69 @@ _FUNCTION_DECLARATIONS = [
                 "key": {
                     "type": "string",
                     "description": (
-                        "Short identifier for the fact, e.g. 'name', 'location', "
-                        "'hobby', 'favorite_food', 'allergy'."
+                        "Short identifier, e.g. 'name', 'location', "
+                        "'hobby', 'favorite_food'."
                     ),
                 },
                 "value": {
                     "type": "string",
-                    "description": "The fact value, e.g. 'Zhafran', 'Bekasi', 'guitar'.",
+                    "description": "The fact value.",
                 },
             },
             "required": ["key", "value"],
         },
     ),
     types.FunctionDeclaration(
-        name="recall_facts",
+        name="memory_search",
         description=(
-            "Retrieve all stored facts about the user from persistent memory. "
-            "Use when the user asks if you remember something about them, asks 'siapa "
-            "nama saya', 'kamu ingat saya?', 'what do you know about me', or similar."
+            "Search stored memories by query. Use when the user "
+            "asks if you remember something, asks 'siapa nama "
+            "saya', 'kamu ingat saya?', 'what do you know about "
+            "me', or to recall specific information."
         ),
         parameters_json_schema={
             "type": "object",
-            "properties": {},
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "What to search for in memory.",
+                },
+            },
+            "required": ["query"],
+        },
+    ),
+    types.FunctionDeclaration(
+        name="memory_forget",
+        description=(
+            "Remove a specific fact from memory. Use when the user "
+            "says 'lupakan nama saya', 'forget my hobby', etc."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string",
+                    "description": "The fact key to forget.",
+                },
+            },
+            "required": ["key"],
+        },
+    ),
+    types.FunctionDeclaration(
+        name="update_user_profile",
+        description=(
+            "Add information to the user's profile. Use for "
+            "significant preferences or traits worth preserving."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {
+                "info": {
+                    "type": "string",
+                    "description": "Text to add to profile.",
+                },
+            },
+            "required": ["info"],
         },
     ),
     # ── System Info ──────────────────────────────────────────────────
@@ -672,6 +719,11 @@ _TOOL_IMPLEMENTATIONS: dict[str, object] = {
     # Web Search
     "web_search": web_search.web_search,
     # User Memory
+    "memory_store": memory_store,
+    "memory_search": memory_search,
+    "memory_forget": memory_forget,
+    "update_user_profile": update_user_profile,
+    # Legacy aliases
     "remember_fact": remember_fact,
     "recall_facts": recall_facts,
     # System Info

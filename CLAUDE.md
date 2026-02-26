@@ -116,9 +116,12 @@ nova/
 │       │   └── time_date.py      # Local time/date
 │       ├── memory/
 │       │   ├── __init__.py
-│       │   ├── context.py        # Sliding window conversation manager
-│       │   ├── persistent.py     # User facts stored in ~/.nova/memory.json
-│       │   └── cache.py          # SQLite response cache
+│       │   ├── context.py            # Legacy sliding window (backward compat)
+│       │   ├── conversation.py       # Phase 3: ConversationManager with auto-compaction
+│       │   ├── memory_store.py       # Phase 3: SQLite-backed memory with FTS5
+│       │   ├── persistent.py         # Phase 3: Tool functions (delegates to MemoryStore)
+│       │   ├── prompt_assembler.py   # Phase 3: File-based prompt system (SOUL/RULES/USER.md)
+│       │   └── retriever.py          # Phase 3: Hybrid FTS5 + vector search
 │       └── utils/
 │           ├── __init__.py
 │           ├── logger.py
@@ -128,7 +131,11 @@ nova/
 │   ├── test_orchestrator.py
 │   ├── test_providers.py
 │   ├── test_router.py
-│   └── test_tools.py
+│   ├── test_tools.py
+│   ├── test_prompt_assembler.py      # Phase 3
+│   ├── test_memory_store.py          # Phase 3
+│   ├── test_conversation_manager.py  # Phase 3
+│   └── test_retriever.py             # Phase 3
 └── scripts/
     ├── setup.sh                  # Full dependency install script
     └── nova.service              # systemd auto-start
@@ -169,6 +176,11 @@ nova/
 - [x] Task 28: TTS sentence merge fix — 40-char threshold to reduce API calls and speech pauses (Phase 2)
 - [x] Task 29: Double-clap detection — alternative wake trigger on same audio stream (Phase 2)
 - [x] Task 30: Whisper hallucination filter — RMS energy gate, no_speech_prob filter, phrase blocklist (Phase 2)
+- [x] Task 31: File-based prompts — SOUL.md/RULES.md/USER.md + PromptAssembler (Phase 3)
+- [x] Task 32: SQLite memory store — FTS5 search, interaction logging, sessions, JSON migration (Phase 3)
+- [x] Task 33: Conversation manager — persistent history, auto-compaction, daily logs, fact extraction (Phase 3)
+- [x] Task 34: Hybrid memory retrieval — FTS5 BM25 + optional vector cosine, time decay (Phase 3)
+- [x] Task 35: Updated LLM tools — memory_store/search/forget, update_user_profile (Phase 3)
 
 ## Important Notes
 

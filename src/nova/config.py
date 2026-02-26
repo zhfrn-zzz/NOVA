@@ -61,6 +61,13 @@ class NovaConfig(BaseSettings):
     log_level: str = "INFO"
     cache_ttl_hours: int = 24
 
+    # Phase 3: Memory & Prompts
+    embedding_enabled: bool = False
+    prompts_dir: str = "~/.nova/prompts"
+    memory_db_path: str = "~/.nova/memory/nova.db"
+    compaction_threshold: int = 15
+    max_conversation_turns: int = 20
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_prefix="NOVA_",

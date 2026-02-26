@@ -16,7 +16,8 @@ import time
 
 from nova.audio.streaming_tts import StreamingTTSPlayer
 from nova.config import get_config
-from nova.memory.context import ConversationContext
+from nova.memory.conversation import ConversationManager
+from nova.memory.memory_store import get_memory_store
 from nova.providers.base import AllProvidersFailedError
 from nova.providers.llm.gemini import GeminiProvider
 from nova.providers.llm.groq_llm import GroqLLMProvider
@@ -96,8 +97,13 @@ class Orchestrator:
         # Audio capture (lazy — created on first voice interaction)
         self._audio_capture = None
 
-        # Conversation memory
-        self._context = ConversationContext(max_turns=config.max_context_turns)
+        # Memory store and conversation manager
+        self._memory_store = get_memory_store()
+        self._context = ConversationManager(
+            memory_store=self._memory_store,
+            llm_fn=self._summarize_for_compaction,
+        )
+        self._context.start_session()
         self._default_language = config.default_language
 
         # Tool declarations for function calling
@@ -117,6 +123,19 @@ class Orchestrator:
             [p.name for p in llm_providers],
             [p.name for p in tts_providers],
             [p.name for p in stt_providers],
+        )
+
+    async def _summarize_for_compaction(self, prompt: str) -> str:
+        """Use the primary LLM to summarize conversation for compaction.
+
+        Args:
+            prompt: The summarization prompt with conversation text.
+
+        Returns:
+            Summary text from the LLM.
+        """
+        return await self._llm_router.execute(
+            "generate", prompt, context=[], tools=None,
         )
 
     def _get_audio_capture(self):
@@ -300,8 +319,8 @@ class Orchestrator:
             logger.exception("[#%d] Unexpected error", interaction_id)
             return "Terjadi kesalahan, tapi saya masih berjalan."
 
-        # Store in context
-        self._context.add_exchange(user_input, response)
+        # Store in context (async)
+        await self._context.add_exchange(user_input, response)
 
         logger.info(
             "Interaction #%d complete — %.2fs | %r → %d chars",
@@ -379,8 +398,8 @@ class Orchestrator:
             logger.exception("[#%d] Unexpected LLM/TTS error", interaction_id)
             return "Terjadi kesalahan, tapi saya masih berjalan."
 
-        # 4. Store in context
-        self._context.add_exchange(transcript, response)
+        # 4. Store in context (async)
+        await self._context.add_exchange(transcript, response)
 
         total_time = time.perf_counter() - total_start
         logger.info(

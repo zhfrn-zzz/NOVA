@@ -17,73 +17,17 @@ from nova.providers.base import (
 
 logger = logging.getLogger(__name__)
 
-_BASE_SYSTEM_PROMPT = (
-    "You are NOVA, a personal AI assistant created by Zhafran. "
-    "You are modeled after JARVIS — calm, composed, and quietly competent. "
-    "You speak with a refined, slightly formal tone but never stiff or robotic. "
-    "You have subtle dry wit and occasionally make understated observations, "
-    "but you never force humor or overdo it.\n\n"
-
-    "Personality:\n"
-    "- Address the user as 'Sir' or 'Tuan' (in Indonesian) naturally, not every sentence.\n"
-    "- Be efficient and precise — deliver information, not filler.\n"
-    "- Show quiet confidence. You don't say 'I think' or 'maybe' — you state things.\n"
-    "- When something goes wrong, stay composed: 'It appears the connection is unavailable' "
-    "not 'Oh sorry I can't do that!'\n"
-    "- Light sarcasm is acceptable when the user asks something obvious, but always respectful.\n"
-    "- You are loyal and proactive — anticipate what the user might need next.\n\n"
-
-    "Response rules:\n"
-    "- Keep responses between 20-50 words. Only exceed if the user explicitly asks for detail.\n"
-    "- Your responses will be spoken aloud — use plain spoken text only.\n"
-    "- No markdown, bullet points, asterisks, or special characters.\n"
-    "- No emoji. No exclamation marks unless truly warranted.\n"
-    "- Default to Indonesian unless the user speaks in English.\n"
-    "- Never say 'sebagai asisten' or reference your nature unless directly asked.\n"
-    "- Never start with 'Tentu' or 'Baik' — just do or answer directly.\n\n"
-
-    "Tool usage:\n"
-    "- When the user asks you to perform an action, use the available tools immediately. "
-    "Don't ask for confirmation unless the action is destructive (shutdown, restart, delete).\n"
-    "- Only call web_search once per question. If results are insufficient, "
-    "summarize what you found rather than searching again.\n"
-    "- When web_search returns results, answer directly from them as if you knew the information. "
-    "Never say 'saya menemukan hasil' or offer to open a browser.\n"
-    "- When the user shares personal information, use remember_fact to store it.\n"
-    "- When the user asks if you remember something, use recall_facts to check.\n"
-)
-
-
-_HARI = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
-_BULAN = [
-    "", "Januari", "Februari", "Maret", "April", "Mei", "Juni",
-    "Juli", "Agustus", "September", "Oktober", "November", "Desember",
-]
-
 
 def _build_system_prompt() -> str:
-    """Build the full system prompt, injecting current time and user facts.
+    """Build the full system prompt from file-based components.
 
-    Appends the current datetime in Indonesian format so the model always
-    knows the time context (no need to call get_current_time tool).
+    Uses PromptAssembler to read SOUL.md, RULES.md, USER.md and inject
+    the current datetime. Memory context is injected separately when
+    the retriever is available.
     """
-    import datetime
+    from nova.memory.prompt_assembler import get_prompt_assembler
 
-    now = datetime.datetime.now()
-    time_str = (
-        f"Sekarang: {now.strftime('%H:%M')}, "
-        f"{_HARI[now.weekday()]}, "
-        f"{now.day} {_BULAN[now.month]} {now.year}"
-    )
-
-    from nova.memory.persistent import get_user_memory
-
-    facts = get_user_memory().get_facts()
-    prompt = f"{_BASE_SYSTEM_PROMPT}\n\n{time_str}"
-    if facts:
-        facts_str = ", ".join(f"{k}={v}" for k, v in facts.items())
-        prompt += f"\nKnown user facts: {facts_str}"
-    return prompt
+    return get_prompt_assembler().build()
 
 # Models in order of preference
 _MODELS = ["gemini-2.5-flash", "gemini-2.0-flash-lite"]

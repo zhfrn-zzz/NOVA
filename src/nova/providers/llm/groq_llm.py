@@ -19,32 +19,15 @@ logger = logging.getLogger(__name__)
 _GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 _MODEL = "llama-3.3-70b-versatile"
 
-_BASE_SYSTEM_PROMPT = (
-    "You are NOVA, a personal voice assistant. You run on a low-spec laptop "
-    "and communicate via voice.\n\n"
-    "Rules:\n"
-    "- Keep responses under 100 words unless the user explicitly asks for detail.\n"
-    "- Be conversational and natural — your responses will be spoken aloud.\n"
-    "- Detect the user's language (Indonesian or English) and respond in the "
-    "same language.\n"
-    "- Don't use markdown formatting, bullet points, or special characters "
-    "— plain spoken text only.\n"
-    '- Don\'t say "as a voice assistant" or reference your nature unless asked.\n'
-    "- Be helpful, direct, and friendly.\n"
-    "- For questions you can't answer, say so briefly rather than making things up."
-)
-
-
 def _build_system_prompt() -> str:
-    """Build the full system prompt, injecting any stored user facts."""
-    from nova.memory.persistent import get_user_memory
+    """Build the full system prompt from file-based components.
 
-    facts = get_user_memory().get_facts()
-    if not facts:
-        return _BASE_SYSTEM_PROMPT
+    Uses PromptAssembler to read SOUL.md, RULES.md, USER.md and inject
+    the current datetime. Same prompt source as the Gemini provider.
+    """
+    from nova.memory.prompt_assembler import get_prompt_assembler
 
-    facts_str = ", ".join(f"{k}={v}" for k, v in facts.items())
-    return f"{_BASE_SYSTEM_PROMPT}\n\nKnown user facts: {facts_str}"
+    return get_prompt_assembler().build()
 
 
 def _build_messages(prompt: str, context: list[dict]) -> list[dict]:
