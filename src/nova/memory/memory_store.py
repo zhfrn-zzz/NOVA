@@ -5,8 +5,10 @@ in ~/.nova/memory/nova.db. Provides FTS5 full-text search and optional
 vector embeddings for hybrid retrieval.
 """
 
+import asyncio
 import json
 import logging
+import re
 import sqlite3
 import struct
 from datetime import datetime
@@ -21,6 +23,25 @@ _MEMORY_MD = _MEMORY_DIR / "MEMORY.md"
 
 # Module-level singleton
 _instance: "MemoryStore | None" = None
+
+
+def _sanitize_fts_query(query: str) -> str:
+    """Remove FTS5 special characters, keep words only.
+
+    FTS5 MATCH syntax treats characters like ?, !, ", *, ( ) as
+    operators, causing syntax errors on raw user input.
+
+    Args:
+        query: Raw user query string.
+
+    Returns:
+        Cleaned query safe for FTS5 MATCH, or empty string.
+    """
+    # Remove everything except letters, numbers, spaces
+    cleaned = re.sub(r"[^\w\s]", " ", query)
+    # Collapse multiple spaces
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
 
 # --- Schema ---
 
@@ -142,6 +163,9 @@ class MemoryStore:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
 
+        # Optional async embedding function: async fn(text) -> list[float] | None
+        self._embedding_fn = None
+
         self._init_schema()
         self._migrate_legacy_json()
 
@@ -203,10 +227,21 @@ class MemoryStore:
 
     # --- Memory CRUD ---
 
+    def set_embedding_fn(self, fn) -> None:
+        """Set the async embedding function for auto-embedding.
+
+        Args:
+            fn: Async callable (text) -> list[float] | None.
+        """
+        self._embedding_fn = fn
+
     def store_memory(
         self, key: str, value: str, source: str = "user",
     ) -> None:
         """Store or update a fact in the memory database.
+
+        If an embedding function is set, schedules background embedding
+        generation for the stored value.
 
         Args:
             key: Fact identifier (e.g. "name", "hobby").
@@ -235,6 +270,29 @@ class MemoryStore:
         self._conn.commit()
         self._sync_memory_md()
         logger.info("Memory stored: %s=%s (source=%s)", key, value, source)
+
+        # Schedule async embedding if available
+        if self._embedding_fn is not None:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._embed_memory(key, value))
+            except RuntimeError:
+                pass  # No running loop — skip embedding
+
+    async def _embed_memory(self, key: str, value: str) -> None:
+        """Generate and store embedding for a memory value."""
+        try:
+            vec = await self._embedding_fn(value)
+            if vec is not None:
+                blob = struct.pack(f"{len(vec)}f", *vec)
+                self._conn.execute(
+                    "UPDATE memories SET embedding = ? WHERE key = ?",
+                    (blob, key),
+                )
+                self._conn.commit()
+                logger.info("Embedded memory: %s (%d dimensions)", key, len(vec))
+        except Exception:
+            logger.warning("Failed to embed memory %s", key, exc_info=True)
 
     def get_memory(self, key: str) -> str | None:
         """Get a single memory by key.
@@ -292,6 +350,10 @@ class MemoryStore:
         Returns:
             List of dicts with id, key, value, updated_at, rank.
         """
+        cleaned = _sanitize_fts_query(query)
+        if not cleaned:
+            return []
+
         try:
             rows = self._conn.execute(
                 """
@@ -299,7 +361,7 @@ class MemoryStore:
                 FROM memories_fts f JOIN memories m ON m.id = f.rowid
                 WHERE memories_fts MATCH ? ORDER BY f.rank LIMIT ?
                 """,
-                (query, limit),
+                (cleaned, limit),
             ).fetchall()
             return [
                 {
@@ -390,6 +452,10 @@ class MemoryStore:
         Returns:
             List of dicts with id, date, role, content, rank.
         """
+        cleaned = _sanitize_fts_query(query)
+        if not cleaned:
+            return []
+
         try:
             rows = self._conn.execute(
                 """
@@ -397,7 +463,7 @@ class MemoryStore:
                 FROM interactions_fts f JOIN interactions i ON i.id = f.rowid
                 WHERE interactions_fts MATCH ? ORDER BY f.rank LIMIT ?
                 """,
-                (query, limit),
+                (cleaned, limit),
             ).fetchall()
             return [
                 {
@@ -474,6 +540,49 @@ class MemoryStore:
                 "embedding": emb,
             })
         return results
+
+    async def backfill_embeddings(
+        self, embedding_fn=None,
+    ) -> int:
+        """Embed all memories that don't have embeddings yet.
+
+        Args:
+            embedding_fn: Async callable (text) -> list[float] | None.
+                          Falls back to self._embedding_fn if not provided.
+
+        Returns:
+            Number of memories successfully embedded.
+        """
+        fn = embedding_fn or self._embedding_fn
+        if fn is None:
+            return 0
+
+        rows = self._conn.execute(
+            "SELECT key, value FROM memories WHERE embedding IS NULL",
+        ).fetchall()
+
+        if not rows:
+            return 0
+
+        count = 0
+        for row in rows:
+            try:
+                vec = await fn(row["value"])
+                if vec is not None:
+                    blob = struct.pack(f"{len(vec)}f", *vec)
+                    self._conn.execute(
+                        "UPDATE memories SET embedding = ? WHERE key = ?",
+                        (blob, row["key"]),
+                    )
+                    self._conn.commit()
+                    count += 1
+            except Exception:
+                logger.warning(
+                    "Backfill failed for %s", row["key"], exc_info=True,
+                )
+
+        logger.info("Backfilled %d memories with embeddings", count)
+        return count
 
     # --- MEMORY.md sync ---
 

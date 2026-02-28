@@ -17,7 +17,10 @@ import time
 from nova.audio.streaming_tts import StreamingTTSPlayer
 from nova.config import get_config
 from nova.memory.conversation import ConversationManager
+from nova.memory.embeddings import get_embedder
 from nova.memory.memory_store import get_memory_store
+from nova.memory.prompt_assembler import get_prompt_assembler
+from nova.memory.retriever import MemoryRetriever
 from nova.providers.base import AllProvidersFailedError
 from nova.providers.llm.gemini import GeminiProvider
 from nova.providers.llm.groq_llm import GroqLLMProvider
@@ -56,6 +59,15 @@ _TOOL_KEYWORDS = {
     "putar", "puterin", "lagu", "musik", "music", "song", "skip",
     # Dictation
     "ketik", "dictate",
+}
+
+# Simple greetings — skip memory retrieval for these
+_GREETINGS = {
+    "halo", "hai", "hi", "hey", "hello",
+    "selamat pagi", "selamat siang", "selamat sore", "selamat malam",
+    "pagi", "siang", "sore", "malam",
+    "good morning", "good afternoon", "good evening", "good night",
+    "assalamualaikum", "apa kabar", "how are you",
 }
 
 
@@ -118,11 +130,30 @@ class Orchestrator:
         # TTS warmup state
         self._tts_warmed_up = False
 
+        # --- Embedding & retrieval ---
+        embedder = get_embedder()
+        self._embedding_fn = embedder.embed if embedder else None
+
+        # Wire embedding into memory store for auto-embedding on store
+        if self._embedding_fn:
+            self._memory_store.set_embedding_fn(self._embedding_fn)
+
+        # Create retriever with embedding function
+        self._retriever = MemoryRetriever(
+            memory_store=self._memory_store,
+            embedding_fn=self._embedding_fn,
+        )
+
+        # Backfill existing memories without embeddings
+        if self._embedding_fn:
+            asyncio.ensure_future(self._backfill_startup())
+
         logger.info(
-            "Orchestrator initialized — LLM: %s | TTS: %s | STT: %s",
+            "Orchestrator initialized — LLM: %s | TTS: %s | STT: %s | Embedder: %s",
             [p.name for p in llm_providers],
             [p.name for p in tts_providers],
             [p.name for p in stt_providers],
+            "enabled" if embedder else "disabled",
         )
 
     async def _summarize_for_compaction(self, prompt: str) -> str:
@@ -144,6 +175,47 @@ class Orchestrator:
             from nova.audio.capture import AudioCapture
             self._audio_capture = AudioCapture()
         return self._audio_capture
+
+    async def _backfill_startup(self) -> None:
+        """Backfill embeddings for memories that don't have them yet."""
+        try:
+            count = await self._memory_store.backfill_embeddings()
+            if count > 0:
+                logger.info("Backfilled %d memories with embeddings", count)
+        except Exception:
+            logger.warning("Startup embedding backfill failed", exc_info=True)
+
+    def _is_simple_greeting(self, text: str) -> bool:
+        """Check if the text is a simple greeting (skip memory retrieval).
+
+        Args:
+            text: The user's input text.
+
+        Returns:
+            True if the text is a short greeting.
+        """
+        cleaned = re.sub(r"[^\w\s]", "", text.lower()).strip()
+        if len(cleaned.split()) >= 5:
+            return False
+        return cleaned in _GREETINGS
+
+    async def _get_memory_context(self, user_input: str) -> str:
+        """Retrieve relevant memory context for the current query.
+
+        Args:
+            user_input: The user's input text.
+
+        Returns:
+            Formatted memory context string, or empty string.
+        """
+        if self._is_simple_greeting(user_input):
+            return ""
+        try:
+            results = await self._retriever.search(user_input)
+            return self._retriever.format_for_prompt(results)
+        except Exception:
+            logger.warning("Memory retrieval failed", exc_info=True)
+            return ""
 
     async def _warmup_tts(self) -> None:
         """Pre-initialize Edge TTS connection for faster first request."""
@@ -176,6 +248,11 @@ class Orchestrator:
         Returns (response_text, total_time) or None if streaming fails.
         Falls back gracefully so the caller can retry with the tool path.
         """
+        # Inject memory context into prompt assembler
+        memory_context = await self._get_memory_context(user_input)
+        if memory_context:
+            get_prompt_assembler().set_memory_context(memory_context)
+
         context = self._context.get_context()
         provider = self._llm_router.providers[0]
 
@@ -229,6 +306,11 @@ class Orchestrator:
             Tuple of (response text, elapsed seconds).
         """
         context = self._context.get_context()
+
+        # Inject memory context into prompt assembler
+        memory_context = await self._get_memory_context(text)
+        if memory_context:
+            get_prompt_assembler().set_memory_context(memory_context)
 
         start = time.perf_counter()
         response = await self._llm_router.execute(

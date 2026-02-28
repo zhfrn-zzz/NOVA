@@ -118,6 +118,7 @@ nova/
 │       │   ├── __init__.py
 │       │   ├── context.py            # Legacy sliding window (backward compat)
 │       │   ├── conversation.py       # Phase 3: ConversationManager with auto-compaction
+│       │   ├── embeddings.py         # Phase 3: Gemini embedding with circuit breaker
 │       │   ├── memory_store.py       # Phase 3: SQLite-backed memory with FTS5
 │       │   ├── persistent.py         # Phase 3: Tool functions (delegates to MemoryStore)
 │       │   ├── prompt_assembler.py   # Phase 3: File-based prompt system (SOUL/RULES/USER.md)
@@ -135,7 +136,8 @@ nova/
 │   ├── test_prompt_assembler.py      # Phase 3
 │   ├── test_memory_store.py          # Phase 3
 │   ├── test_conversation_manager.py  # Phase 3
-│   └── test_retriever.py             # Phase 3
+│   ├── test_retriever.py             # Phase 3
+│   └── test_embeddings.py            # Phase 3
 └── scripts/
     ├── setup.sh                  # Full dependency install script
     └── nova.service              # systemd auto-start
@@ -181,6 +183,8 @@ nova/
 - [x] Task 33: Conversation manager — persistent history, auto-compaction, daily logs, fact extraction (Phase 3)
 - [x] Task 34: Hybrid memory retrieval — FTS5 BM25 + optional vector cosine, time decay (Phase 3)
 - [x] Task 35: Updated LLM tools — memory_store/search/forget, update_user_profile (Phase 3)
+- [x] Task 36: Gemini embedding integration — GeminiEmbedder with circuit breaker, auto-embed on store, backfill, hybrid retrieval wired into orchestrator (Phase 3)
+- [x] Task 37: FTS5 query sanitization — strip special chars before MATCH, skip short queries in retriever, embed log visibility (Phase 3)
 
 ## Important Notes
 

@@ -146,7 +146,7 @@ class GeminiProvider(LLMProvider):
             system_instruction=_build_system_prompt(),
             tools=tools,
             temperature=0.3,
-            max_output_tokens=150,
+            max_output_tokens=512,
         )
 
     async def generate(

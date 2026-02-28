@@ -68,6 +68,12 @@ class NovaConfig(BaseSettings):
     compaction_threshold: int = 15
     max_conversation_turns: int = 20
 
+    # Embeddings
+    embedding_model: str = "gemini-embedding-001"
+    embedding_dimensions: int = 3072
+    embedding_circuit_breaker_threshold: int = 3
+    embedding_circuit_breaker_cooldown: int = 300  # seconds
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_prefix="NOVA_",

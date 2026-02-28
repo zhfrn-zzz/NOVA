@@ -77,6 +77,24 @@ class TestFTS5Search:
         results = store.search_memories_fts("item", limit=3)
         assert len(results) <= 3
 
+    def test_search_with_special_characters(self, store):
+        """FTS5 should not crash on queries with ?, !, etc."""
+        store.store_memory("hobby", "programming")
+        # These should NOT raise sqlite3.OperationalError
+        results = store.search_memories_fts("hobby?")
+        assert len(results) >= 1  # "hobby?" → "hobby" matches
+        results = store.search_memories_fts("hobby!")
+        assert len(results) >= 1  # "hobby!" → "hobby" matches
+        # Multi-word with special chars — should not crash even if no match
+        store.search_memories_fts('hobby "test"')
+        store.search_memories_fts("hobby (test)")
+        store.search_memories_fts("what? where! how*")
+
+    def test_search_all_special_chars_returns_empty(self, store):
+        """Query with only special characters should return empty."""
+        results = store.search_memories_fts("???!!!")
+        assert results == []
+
 
 class TestInteractions:
     def test_log_and_retrieve_interactions(self, store):

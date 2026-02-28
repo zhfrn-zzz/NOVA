@@ -53,14 +53,16 @@ class MemoryRetriever:
         """
         results: dict[int, dict] = {}
 
-        # FTS5 keyword search
-        for row in self._store.search_memories_fts(query):
-            score = 1.0 / (1.0 + abs(row["rank"]))
-            results[row["id"]] = {
-                **row,
-                "keyword_score": score,
-                "vector_score": 0.0,
-            }
+        # FTS5 keyword search — skip for very short queries (noise)
+        cleaned_query = query.strip()
+        if len(cleaned_query) > 1:
+            for row in self._store.search_memories_fts(query):
+                score = 1.0 / (1.0 + abs(row["rank"]))
+                results[row["id"]] = {
+                    **row,
+                    "keyword_score": score,
+                    "vector_score": 0.0,
+                }
 
         # Vector search (if embedding function available)
         if self._embedding_fn:

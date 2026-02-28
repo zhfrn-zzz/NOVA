@@ -82,6 +82,9 @@ class PromptAssembler:
         # Cache: filename -> (mtime, content)
         self._cache: dict[str, tuple[float, str]] = {}
 
+        # Pending memory context (set by orchestrator, consumed by build())
+        self._pending_memory_context: str = ""
+
         # Ensure directory and defaults exist
         self._ensure_defaults()
 
@@ -161,6 +164,9 @@ class PromptAssembler:
         sections.append(f"Current date and time: {datetime_str}")
 
         # 5. Relevant memories — from hybrid search, NOT full dump
+        if not memory_context:
+            memory_context = self._pending_memory_context
+            self._pending_memory_context = ""  # Consume once
         if memory_context:
             sections.append(f"Relevant memories:\n{memory_context}")
 
@@ -199,6 +205,16 @@ class PromptAssembler:
     def prompts_dir(self) -> Path:
         """Return the prompts directory path."""
         return self._dir
+
+    def set_memory_context(self, context: str) -> None:
+        """Set memory context to be included in the next build() call.
+
+        The context is consumed (cleared) after the next build() call.
+
+        Args:
+            context: Formatted memory context string.
+        """
+        self._pending_memory_context = context
 
 
 def get_prompt_assembler() -> PromptAssembler:
