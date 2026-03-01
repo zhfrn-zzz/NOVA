@@ -74,6 +74,22 @@ class NovaConfig(BaseSettings):
     embedding_circuit_breaker_threshold: int = 3
     embedding_circuit_breaker_cooldown: int = 300  # seconds
 
+    # Phase 4: Heartbeat
+    heartbeat_enabled: bool = True
+    heartbeat_interval: int = 60  # seconds between checks
+    quiet_hours_start: int = 23  # 23:00
+    quiet_hours_end: int = 6  # 06:00
+    morning_greeting_enabled: bool = True
+    sleep_reminder_enabled: bool = True
+    ambient_presence_threshold: float = 0.005  # RMS below = likely away
+
+    # Notification audio
+    chime_volume: float = 0.3  # 0.0-1.0
+    alert_volume: float = 0.5
+    gentle_listen_timeout: int = 5  # seconds to wait after chime
+    gentle_max_retries: int = 3
+    gentle_retry_delay: int = 300  # seconds between retries (5 min)
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_prefix="NOVA_",

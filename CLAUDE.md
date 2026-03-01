@@ -116,7 +116,9 @@ nova/
 │       │   └── time_date.py      # Local time/date
 │       ├── heartbeat/
 │       │   ├── __init__.py
-│       │   └── queue.py          # NotificationQueue, Notification, Urgency
+│       │   ├── queue.py          # NotificationQueue, Notification, Urgency
+│       │   ├── scheduler.py      # HeartbeatScheduler (background thread)
+│       │   └── audio.py          # generate_chime(), generate_alert()
 │       ├── memory/
 │       │   ├── __init__.py
 │       │   ├── context.py            # Legacy sliding window (backward compat)
@@ -141,7 +143,9 @@ nova/
 │   ├── test_conversation_manager.py  # Phase 3
 │   ├── test_retriever.py             # Phase 3
 │   ├── test_embeddings.py            # Phase 3
-│   └── test_heartbeat_data.py        # Phase 4: Heartbeat
+│   ├── test_heartbeat_data.py        # Phase 4: Heartbeat data layer
+│   ├── test_heartbeat_scheduler.py   # Phase 4: Heartbeat scheduler
+│   └── test_heartbeat_audio.py       # Phase 4: Audio generation
 └── scripts/
     ├── setup.sh                  # Full dependency install script
     └── nova.service              # systemd auto-start
@@ -191,6 +195,7 @@ nova/
 - [x] Task 37: FTS5 query sanitization — strip special chars before MATCH, skip short queries in retriever, embed log visibility (Phase 3)
 - [x] Task 38: Unified streaming-with-tools — merged dual-path into single streaming path with inline function calling, removed keyword heuristics (Phase 3)
 - [x] Task 39: Heartbeat data layer — reminders table, notification queue, set/list/cancel reminder tools, RULES.md update (Phase 4)
+- [x] Task 40: Heartbeat scheduler + audio — HeartbeatScheduler background thread, chime/alert generation, config fields, quiet hours, ambient gate (Phase 4)
 
 ## Important Notes
 
