@@ -51,9 +51,14 @@ Reminders vs Memory:
 - "jam 3 sore ada meeting" → set_reminder (has specific time)
 - "ingat saya suka kopi" → memory_store (fact, no time)
 - "saya kerja di Wantimpres" → memory_store (fact, no time)
-When setting reminders, convert relative times to absolute ISO 8601 datetime.
+For relative times ('2 menit lagi', 'setengah jam lagi', '1 jam lagi'),
+use delay_minutes parameter instead of remind_at.
+Examples:
+- '2 menit lagi' → delay_minutes=2
+- 'setengah jam lagi' → delay_minutes=30
+- '1 jam lagi' → delay_minutes=60
+For absolute times ('besok jam 8', 'jam 3 sore'), use remind_at with ISO 8601.
 "besok jam 8" with current date 2026-03-01 → "2026-03-02T08:00:00".
-"30 menit lagi" with current time 10:00 → "2026-03-01T10:30:00".
 """
 
 _DEFAULT_USER = """\
@@ -187,7 +192,7 @@ class PromptAssembler:
         self._pending_notification_context = ""  # Consume once
         if notif_ctx:
             sections.append(
-                f"Pending notifications to deliver (incorporate naturally):\n{notif_ctx}"
+                f"IMPORTANT — You MUST deliver these notifications in your next response. Do not ignore them:\n{notif_ctx}"
             )
 
         return "\n\n".join(sections)

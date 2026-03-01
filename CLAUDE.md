@@ -78,6 +78,7 @@ nova/
 │       │   ├── capture.py        # Mic input + VAD
 │       │   ├── clap_detector.py  # Double-clap wake trigger (alternative)
 │       │   ├── playback.py       # Speaker output (mpv)
+│       │   ├── sound_loader.py   # Custom sound loader (~/.nova/sounds/ + fallback)
 │       │   ├── streaming_tts.py  # Split-and-stream TTS for low latency
 │       │   ├── wake_word.py      # Hotkey fallback detector (Ctrl+Space)
 │       │   └── wake_word_oww.py  # OpenWakeWord detector (default)
@@ -145,7 +146,8 @@ nova/
 │   ├── test_embeddings.py            # Phase 3
 │   ├── test_heartbeat_data.py        # Phase 4: Heartbeat data layer
 │   ├── test_heartbeat_scheduler.py   # Phase 4: Heartbeat scheduler
-│   └── test_heartbeat_audio.py       # Phase 4: Audio generation
+│   ├── test_heartbeat_audio.py       # Phase 4: Audio generation
+│   └── test_sound_loader.py         # Phase 4: Custom sound loader
 └── scripts/
     ├── setup.sh                  # Full dependency install script
     └── nova.service              # systemd auto-start
@@ -196,6 +198,11 @@ nova/
 - [x] Task 38: Unified streaming-with-tools — merged dual-path into single streaming path with inline function calling, removed keyword heuristics (Phase 3)
 - [x] Task 39: Heartbeat data layer — reminders table, notification queue, set/list/cancel reminder tools, RULES.md update (Phase 4)
 - [x] Task 40: Heartbeat scheduler + audio — HeartbeatScheduler background thread, chime/alert generation, config fields, quiet hours, ambient gate (Phase 4)
+- [x] Task 42: Relative time handling — delay_minutes parameter for set_reminder, LLM no longer calculates relative times (Phase 4)
+- [x] Task 43: Heartbeat bugfixes — lead_time auto-clamp when delay_minutes <= lead_time, scheduler debug logging, queue identity verification logging (Phase 4)
+- [x] Task 44: Text-only GENTLE delivery — GENTLE notifications injected into LLM context in text-only mode instead of printing separate 🔔 line (Phase 4)
+- [x] Task 45: Dynamic urgency — scheduler auto-calculates urgency from time proximity: <=5min ACTIVE, <=30min GENTLE, >30min PASSIVE (Phase 4)
+- [x] Task 46: Custom sounds — ~/.nova/sounds/ for beep/chime/alert overrides, soundfile loading with stereo-to-mono + resampling, cached, config toggle (Phase 4)
 
 ## Important Notes
 

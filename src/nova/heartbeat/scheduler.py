@@ -93,17 +93,24 @@ class HeartbeatScheduler:
 
     def _check_reminders(self, now: datetime) -> None:
         """Find due reminders and push to notification queue."""
-        pending = self._store.get_pending_reminders(now, window_minutes=2)
+        logger.debug(
+            "Heartbeat tick: checking reminders (now=%s, queue_id=%s)",
+            now.isoformat(), id(self._queue),
+        )
+        pending = self._store.get_pending_reminders(now, window_minutes=0)
+        logger.debug("Found %d pending reminders", len(pending))
 
         for r in pending:
-            urgency = Urgency(r["urgency"])
+            # Dynamic urgency based on time proximity
+            time_until = (r["remind_at"] - now).total_seconds() / 60
+            urgency = self._calculate_dynamic_urgency(time_until)
 
             # Quiet hours: downgrade non-alarm to PASSIVE
             if self._is_quiet(now) and not r["is_alarm"]:
                 urgency = Urgency.PASSIVE
 
             # Ambient noise gate: very quiet → likely away/sleeping
-            if self._ambient_fn and urgency >= Urgency.GENTLE:
+            if self._ambient_fn and urgency == Urgency.GENTLE:
                 ambient = self._ambient_fn()
                 if ambient < self._config.ambient_presence_threshold:
                     urgency = Urgency.PASSIVE
@@ -124,8 +131,8 @@ class HeartbeatScheduler:
                 self._store.schedule_next_recurrence(r)
 
             logger.info(
-                "Reminder triggered: '%s' (urgency=%s)",
-                r["message"], urgency.name,
+                "Pushed reminder #%d to queue (urgency=%s): '%s'",
+                r["id"], urgency.name, r["message"],
             )
 
     # ── Built-in Rules ─────────────────────────────────────────────
@@ -170,6 +177,22 @@ class HeartbeatScheduler:
             logger.debug("Sleep reminder queued")
 
     # ── Helpers ────────────────────────────────────────────────────
+
+    @staticmethod
+    def _calculate_dynamic_urgency(time_until_minutes: float) -> Urgency:
+        """Calculate urgency based on time proximity to remind_at.
+
+        Args:
+            time_until_minutes: Minutes until remind_at (negative = past due).
+
+        Returns:
+            Dynamic urgency: ACTIVE (<=5 min), GENTLE (<=30 min), PASSIVE (>30 min).
+        """
+        if time_until_minutes <= 5:
+            return Urgency.ACTIVE
+        if time_until_minutes <= 30:
+            return Urgency.GENTLE
+        return Urgency.PASSIVE
 
     def _is_quiet(self, now: datetime) -> bool:
         """Check if current time is within quiet hours."""

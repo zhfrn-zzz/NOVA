@@ -56,6 +56,31 @@ def generate_beep(
     return buffer.getvalue()
 
 
+def _generate_beep_as_ndarray(sample_rate: int = 16000, **kwargs):
+    """Wrapper around generate_beep that returns numpy int16 array.
+
+    Used as fallback_fn for sound_loader.load_sound().
+
+    Returns:
+        Audio as int16 numpy array.
+    """
+    import numpy as np
+
+    wav_bytes = generate_beep(sample_rate=sample_rate, **kwargs)
+    buf = io.BytesIO(wav_bytes)
+    with wave.open(buf, "rb") as wf:
+        raw = wf.readframes(wf.getnframes())
+    return np.frombuffer(raw, dtype=np.int16)
+
+
+def _get_beep_bytes() -> bytes:
+    """Get beep sound as WAV bytes — custom file or generated fallback."""
+    from nova.audio.sound_loader import audio_to_wav_bytes, load_sound
+
+    audio = load_sound("beep", _generate_beep_as_ndarray, sample_rate=16000)
+    return audio_to_wav_bytes(audio, sample_rate=16000)
+
+
 class HotkeyWakeWordDetector:
     """Listens for a keyboard hotkey to activate NOVA.
 
@@ -70,7 +95,7 @@ class HotkeyWakeWordDetector:
         self._listener = None
         self._event: asyncio.Event | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
-        self._beep_bytes = generate_beep()
+        self._beep_bytes = _get_beep_bytes()
 
     def start(self, loop: asyncio.AbstractEventLoop) -> None:
         """Start the hotkey listener in a background thread.

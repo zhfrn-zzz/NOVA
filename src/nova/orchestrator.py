@@ -217,8 +217,22 @@ class Orchestrator:
             logger.debug("TTS warmup failed (non-critical)")
 
     def _inject_passive_notifications(self) -> None:
-        """Check for passive notifications and inject into prompt context."""
-        passive = self._notification_queue.get_passive()
+        """Check for pending notifications and inject into prompt context.
+
+        In text-only mode, grabs both PASSIVE and GENTLE notifications
+        since there's no chime/listen capability — GENTLE notifications
+        are delivered naturally via LLM context instead.
+        In voice mode, only grabs PASSIVE (GENTLE handled by chime flow).
+        """
+        logger.debug(
+            "Checking notifications (queue_id=%s, size=%d, text_only=%s)",
+            id(self._notification_queue), self._notification_queue.size(),
+            self._text_only,
+        )
+        if self._text_only:
+            passive = self._notification_queue.get_passive_and_gentle()
+        else:
+            passive = self._notification_queue.get_passive()
         if passive:
             note_text = self._format_notifications(passive)
             get_prompt_assembler().set_notification_context(note_text)
@@ -550,7 +564,7 @@ class Orchestrator:
         elif notification.message == "__sleep_reminder__":
             prompt = "Gently remind the user it's late and time to rest."
         else:
-            prompt = f"Deliver this reminder concisely: {notification.message}"
+            prompt = f"Katakan persis ini ke user: 'Tuan, pengingat: {notification.message}.' Jangan tambahkan apapun selain itu."
 
         # Use LLM to generate natural wording, then TTS
         try:

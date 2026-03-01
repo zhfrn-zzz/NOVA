@@ -51,6 +51,18 @@ class NotificationQueue:
             self._queue = [n for n in self._queue if n.urgency != Urgency.PASSIVE]
             return passive
 
+    def get_passive_and_gentle(self) -> list[Notification]:
+        """Get and remove all PASSIVE and GENTLE notifications.
+
+        Used in text-only mode where there's no chime/listen capability,
+        so GENTLE notifications are injected into LLM context instead.
+        ACTIVE notifications remain in the queue for separate handling.
+        """
+        with self._lock:
+            taken = [n for n in self._queue if n.urgency <= Urgency.GENTLE]
+            self._queue = [n for n in self._queue if n.urgency > Urgency.GENTLE]
+            return taken
+
     def get_next_urgent(self) -> Notification | None:
         """Get and remove the highest urgency GENTLE/ACTIVE notification."""
         with self._lock:

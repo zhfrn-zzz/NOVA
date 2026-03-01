@@ -11,7 +11,7 @@ import threading
 
 import sounddevice as sd
 
-from nova.audio.wake_word import generate_beep
+from nova.audio.wake_word import _get_beep_bytes
 from nova.config import get_config
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,7 @@ class OpenWakeWordDetector:
         self._running = False
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
-        self._beep_bytes = generate_beep()
+        self._beep_bytes = _get_beep_bytes()
         # Cooldown: ignore predictions for N frames after activation
         self._cooldown_frames = 0
         self._cooldown_total = 20  # ~1.6s at 80ms/frame

@@ -177,21 +177,32 @@ def _run_quota() -> None:
 
 
 async def _check_text_notifications(orchestrator) -> None:
-    """Check for urgent heartbeat notifications in text/voice mode.
+    """Check for ACTIVE heartbeat notifications in text/push-to-talk mode.
 
-    Prints notifications to the console instead of playing audio.
-    Passive notifications are handled automatically by the orchestrator
+    Only handles ACTIVE notifications (printed to console).
+    PASSIVE and GENTLE notifications are handled by the orchestrator
     (injected into LLM context on next interaction).
     """
+    from nova.heartbeat.queue import Urgency
+
     queue = orchestrator.notification_queue
     if not queue.has_urgent():
         return
 
+    # Peek: only handle ACTIVE notifications here.
+    # GENTLE notifications are left in the queue for the orchestrator
+    # to inject into LLM context (via get_passive_and_gentle in text mode).
     notif = queue.get_next_urgent()
     if notif is None:
         return
 
-    # Format the message for console display
+    if notif.urgency != Urgency.ACTIVE:
+        # Not ACTIVE — put it back for orchestrator to handle via context
+        notif.urgency = Urgency.PASSIVE
+        queue.push(notif)
+        return
+
+    # Format ACTIVE notification for console display
     if notif.message == "__morning_greeting__":
         msg = "Selamat pagi, Pak."
     elif notif.message == "__sleep_reminder__":
@@ -199,7 +210,7 @@ async def _check_text_notifications(orchestrator) -> None:
     else:
         msg = notif.message
 
-    console.print(f"\n[bold yellow]🔔 [NOVA notification][/] {msg}\n")
+    console.print(f"\n[bold yellow]🔔 [NOVA alert][/] {msg}\n")
 
 
 async def _check_voice_notifications(orchestrator, detector, config) -> bool:
@@ -211,7 +222,7 @@ async def _check_voice_notifications(orchestrator, detector, config) -> bool:
     if not queue.has_urgent():
         return False
 
-    from nova.heartbeat.audio import generate_alert, generate_chime, play_notification_sound
+    from nova.heartbeat.audio import get_alert, get_chime, play_notification_sound
     from nova.heartbeat.queue import Urgency
 
     notif = queue.get_next_urgent()
@@ -226,7 +237,7 @@ async def _check_voice_notifications(orchestrator, detector, config) -> bool:
 
         # 2. Play chime
         try:
-            chime = generate_chime(volume=config.chime_volume)
+            chime = get_chime(volume=config.chime_volume)
             play_notification_sound(chime)
         except Exception:
             logger.warning("Chime playback failed", exc_info=True)
@@ -279,10 +290,10 @@ async def _check_voice_notifications(orchestrator, detector, config) -> bool:
         # 1. Pause wake word detector
         detector.stop()
 
-        # 2. Play alert sound
+        # 2. Play alert sound (loop 3x before speaking)
         try:
-            alert = generate_alert(volume=config.alert_volume)
-            play_notification_sound(alert)
+            alert = get_alert(volume=config.alert_volume)
+            play_notification_sound(alert, repeat=3)
         except Exception:
             logger.warning("Alert playback failed", exc_info=True)
 
@@ -529,7 +540,17 @@ async def _wake_word_mode(orchestrator, force_hotkey: bool = False) -> None:
             done, pending = await asyncio.wait(
                 [activation_task, exit_task],
                 return_when=asyncio.FIRST_COMPLETED,
+                timeout=5,
             )
+
+            # Timeout — no wake word, no exit. Loop back to check queue.
+            if not done:
+                activation_task.cancel()
+                try:
+                    await activation_task
+                except asyncio.CancelledError:
+                    pass
+                continue
 
             # Cancel pending tasks
             for task in pending:

@@ -23,7 +23,7 @@ class TestNotificationContext:
         """Notification context should appear in the assembled prompt."""
         self.assembler.set_notification_context("Remind the user: Ujian jam 8")
         prompt = self.assembler.build()
-        assert "Pending notifications to deliver" in prompt
+        assert "MUST deliver these notifications" in prompt
         assert "Remind the user: Ujian jam 8" in prompt
 
     def test_notification_context_consumed_after_build(self):
@@ -32,7 +32,7 @@ class TestNotificationContext:
         self.assembler.build()
         # Second build should have no notification context
         prompt2 = self.assembler.build()
-        assert "Pending notifications" not in prompt2
+        assert "MUST deliver these notifications" not in prompt2
 
     def test_notification_and_memory_context_coexist(self):
         """Both memory and notification context should appear together."""
@@ -40,12 +40,12 @@ class TestNotificationContext:
         self.assembler.set_notification_context("Morning greeting")
         prompt = self.assembler.build()
         assert "Relevant memories" in prompt
-        assert "Pending notifications" in prompt
+        assert "MUST deliver these notifications" in prompt
 
     def test_no_notification_section_when_empty(self):
         """No notification section when no context is set."""
         prompt = self.assembler.build()
-        assert "Pending notifications" not in prompt
+        assert "MUST deliver these notifications" not in prompt
 
 
 # ── Orchestrator: format_notifications ──────────────────────────────
@@ -202,6 +202,7 @@ class TestPassiveInjection:
         # Create a minimal orchestrator mock that has the real method
         orch = MagicMock(spec=orch_cls)
         orch._notification_queue = NotificationQueue()
+        orch._text_only = False
         orch._inject_passive_notifications = (
             orch_cls._inject_passive_notifications.__get__(orch)
         )
@@ -227,6 +228,7 @@ class TestPassiveInjection:
 
         orch = MagicMock(spec=orch_cls)
         orch._notification_queue = NotificationQueue()
+        orch._text_only = False
         orch._inject_passive_notifications = (
             orch_cls._inject_passive_notifications.__get__(orch)
         )
@@ -234,6 +236,63 @@ class TestPassiveInjection:
         with patch.object(orchestrator_module, "get_prompt_assembler") as mock_assembler:
             orch._inject_passive_notifications()
             mock_assembler.return_value.set_notification_context.assert_not_called()
+
+    def test_text_only_grabs_gentle(self, orchestrator_module):
+        """In text-only mode, GENTLE notifications should be injected into context."""
+        orch_cls = orchestrator_module.Orchestrator
+
+        orch = MagicMock(spec=orch_cls)
+        orch._notification_queue = NotificationQueue()
+        orch._text_only = True
+        orch._inject_passive_notifications = (
+            orch_cls._inject_passive_notifications.__get__(orch)
+        )
+        orch._format_notifications = orch_cls._format_notifications
+
+        # Push a GENTLE notification (reminder)
+        orch._notification_queue.push(Notification(
+            message="Minum air",
+            urgency=Urgency.GENTLE,
+            source="reminder",
+            created_at=datetime.now(),
+        ))
+
+        with patch.object(orchestrator_module, "get_prompt_assembler") as mock_assembler:
+            orch._inject_passive_notifications()
+            mock_assembler.return_value.set_notification_context.assert_called_once()
+            call_arg = mock_assembler.return_value.set_notification_context.call_args[0][0]
+            assert "Minum air" in call_arg
+
+        # Queue should be empty (GENTLE was consumed)
+        assert orch._notification_queue.is_empty()
+
+    def test_voice_mode_leaves_gentle(self, orchestrator_module):
+        """In voice mode, GENTLE notifications should NOT be grabbed by inject."""
+        orch_cls = orchestrator_module.Orchestrator
+
+        orch = MagicMock(spec=orch_cls)
+        orch._notification_queue = NotificationQueue()
+        orch._text_only = False
+        orch._inject_passive_notifications = (
+            orch_cls._inject_passive_notifications.__get__(orch)
+        )
+        orch._format_notifications = orch_cls._format_notifications
+
+        # Push a GENTLE notification
+        orch._notification_queue.push(Notification(
+            message="Minum air",
+            urgency=Urgency.GENTLE,
+            source="reminder",
+            created_at=datetime.now(),
+        ))
+
+        with patch.object(orchestrator_module, "get_prompt_assembler") as mock_assembler:
+            orch._inject_passive_notifications()
+            # Should NOT have called set_notification_context (GENTLE left in queue)
+            mock_assembler.return_value.set_notification_context.assert_not_called()
+
+        # GENTLE should still be in queue
+        assert orch._notification_queue.size() == 1
 
 
 # ── Orchestrator: Notification Queue Property ──────────────────────

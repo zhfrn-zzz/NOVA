@@ -86,9 +86,41 @@ def generate_alert(
     return audio
 
 
+def get_chime(sample_rate: int = 22050, volume: float = 0.3) -> np.ndarray:
+    """Get chime sound — custom file or generated fallback.
+
+    Args:
+        sample_rate: Audio sample rate in Hz.
+        volume: Volume for generated fallback.
+
+    Returns:
+        Audio data as int16 numpy array.
+    """
+    from nova.audio.sound_loader import load_sound
+
+    return load_sound("chime", generate_chime, sample_rate, volume=volume)
+
+
+def get_alert(sample_rate: int = 22050, volume: float = 0.5) -> np.ndarray:
+    """Get alert sound — custom file or generated fallback.
+
+    Args:
+        sample_rate: Audio sample rate in Hz.
+        volume: Volume for generated fallback.
+
+    Returns:
+        Audio data as int16 numpy array.
+    """
+    from nova.audio.sound_loader import load_sound
+
+    return load_sound("alert", generate_alert, sample_rate, volume=volume)
+
+
 def play_notification_sound(
     audio: np.ndarray,
     sample_rate: int = 22050,
+    repeat: int = 1,
+    gap_ms: int = 300,
 ) -> None:
     """Play an audio array through the default output device.
 
@@ -98,7 +130,19 @@ def play_notification_sound(
     Args:
         audio: int16 numpy audio array.
         sample_rate: Sample rate of the audio data.
+        repeat: Number of times to play the sound.
+        gap_ms: Silence gap between repeats in milliseconds.
     """
+    if repeat > 1:
+        gap_samples = int(sample_rate * gap_ms / 1000)
+        silence = np.zeros(gap_samples, dtype=np.int16)
+        parts = []
+        for i in range(repeat):
+            parts.append(audio)
+            if i < repeat - 1:
+                parts.append(silence)
+        audio = np.concatenate(parts)
+
     try:
         import sounddevice as sd
         sd.play(audio, samplerate=sample_rate)

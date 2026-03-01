@@ -505,12 +505,10 @@ _FUNCTION_DECLARATIONS = [
     types.FunctionDeclaration(
         name="set_reminder",
         description=(
-            "Set a reminder at a specific date and time. Use when the user says "
-            "'ingatkan saya besok jam 8', 'remind me at 3 PM', 'jam 3 sore ada meeting', "
-            "'set reminder', 'ingatkan untuk istirahat jam 5', or similar. "
-            "Convert relative times to absolute ISO 8601 datetime. "
-            "Example: 'besok jam 8' with today 2026-03-01 → '2026-03-02T08:00:00'. "
-            "'30 menit lagi' with now 10:00 → '2026-03-01T10:30:00'."
+            "Set a reminder. For relative times ('2 menit lagi', 'setengah jam lagi', "
+            "'1 jam lagi'), use delay_minutes. For absolute times ('besok jam 8', "
+            "'jam 3 sore'), use remind_at with ISO 8601. One of remind_at or "
+            "delay_minutes must be provided. If both given, delay_minutes wins."
         ),
         parameters_json_schema={
             "type": "object",
@@ -523,7 +521,16 @@ _FUNCTION_DECLARATIONS = [
                     "type": "string",
                     "description": (
                         "ISO 8601 datetime for when to remind, "
-                        "e.g. '2026-03-02T08:00:00'."
+                        "e.g. '2026-03-02T08:00:00'. "
+                        "Use for absolute times like 'besok jam 8'."
+                    ),
+                },
+                "delay_minutes": {
+                    "type": "integer",
+                    "description": (
+                        "Minutes from now to remind. Use for relative times: "
+                        "'2 menit lagi' → 2, 'setengah jam lagi' → 30, "
+                        "'1 jam lagi' → 60. If provided, overrides remind_at."
                     ),
                 },
                 "lead_time": {
@@ -542,7 +549,7 @@ _FUNCTION_DECLARATIONS = [
                     ),
                 },
             },
-            "required": ["message", "remind_at"],
+            "required": ["message"],
         },
     ),
     types.FunctionDeclaration(

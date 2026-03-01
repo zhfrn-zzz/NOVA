@@ -675,8 +675,7 @@ class MemoryStore:
             List of reminder dicts with parsed remind_at as datetime.
         """
         now_str = now.isoformat()
-        rows = self._conn.execute(
-            """
+        sql = """
             SELECT id, message, remind_at, lead_time, is_alarm,
                    urgency, recurring
             FROM reminders
@@ -684,9 +683,11 @@ class MemoryStore:
               AND datetime(remind_at, '-' || lead_time || ' minutes')
                   <= datetime(?, '+' || ? || ' minutes')
             ORDER BY remind_at ASC
-            """,
-            (now_str, window_minutes),
-        ).fetchall()
+            """
+        params = (now_str, window_minutes)
+        logger.debug("get_pending_reminders SQL params: now=%s, window=%d", now_str, window_minutes)
+        rows = self._conn.execute(sql, params).fetchall()
+        logger.debug("get_pending_reminders found %d rows", len(rows))
 
         results = []
         for row in rows:

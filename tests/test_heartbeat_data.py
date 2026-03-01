@@ -2,6 +2,7 @@
 
 import threading
 from datetime import datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 
@@ -162,6 +163,66 @@ class TestScheduleNextRecurrence:
         assert result is None
 
 
+# ── set_reminder lead_time clamping ──────────────────────────────────
+
+
+class TestSetReminderLeadTime:
+    """Bug fix: delay_minutes <= lead_time should auto-set lead_time=0."""
+
+    @pytest.mark.asyncio
+    async def test_delay_shorter_than_lead_time(self, store):
+        """delay_minutes=2, default lead_time=5 → lead_time clamped to 0."""
+        with patch("nova.tools.heartbeat_reminders.get_memory_store", return_value=store):
+            from nova.tools.heartbeat_reminders import set_reminder
+
+            result = await set_reminder("minum air", delay_minutes=2)
+            assert "diset" in result
+
+            reminders = store.list_reminders()
+            assert len(reminders) == 1
+            assert reminders[0]["lead_time"] == 0
+
+    @pytest.mark.asyncio
+    async def test_delay_equal_to_lead_time(self, store):
+        """delay_minutes=5, lead_time=5 → lead_time clamped to 0."""
+        with patch("nova.tools.heartbeat_reminders.get_memory_store", return_value=store):
+            from nova.tools.heartbeat_reminders import set_reminder
+
+            result = await set_reminder("minum air", delay_minutes=5, lead_time=5)
+            assert "diset" in result
+
+            reminders = store.list_reminders()
+            assert len(reminders) == 1
+            assert reminders[0]["lead_time"] == 0
+
+    @pytest.mark.asyncio
+    async def test_delay_longer_than_lead_time(self, store):
+        """delay_minutes=30, lead_time=5 → lead_time stays 5."""
+        with patch("nova.tools.heartbeat_reminders.get_memory_store", return_value=store):
+            from nova.tools.heartbeat_reminders import set_reminder
+
+            result = await set_reminder("meeting", delay_minutes=30, lead_time=5)
+            assert "diset" in result
+
+            reminders = store.list_reminders()
+            assert len(reminders) == 1
+            assert reminders[0]["lead_time"] == 5
+
+    @pytest.mark.asyncio
+    async def test_absolute_time_keeps_lead_time(self, store):
+        """Absolute remind_at should NOT clamp lead_time."""
+        future = (datetime.now() + timedelta(hours=2)).isoformat(timespec="seconds")
+        with patch("nova.tools.heartbeat_reminders.get_memory_store", return_value=store):
+            from nova.tools.heartbeat_reminders import set_reminder
+
+            result = await set_reminder("meeting", remind_at=future, lead_time=5)
+            assert "diset" in result
+
+            reminders = store.list_reminders()
+            assert len(reminders) == 1
+            assert reminders[0]["lead_time"] == 5
+
+
 # ── NotificationQueue ────────────────────────────────────────────────
 
 
@@ -183,6 +244,38 @@ class TestNotificationQueue:
         assert len(passive) == 2
         assert all(n.urgency == Urgency.PASSIVE for n in passive)
         # GENTLE should still be in queue
+        assert q.size() == 1
+
+    def test_get_passive_and_gentle(self):
+        """get_passive_and_gentle drains PASSIVE+GENTLE, leaves ACTIVE."""
+        q = NotificationQueue()
+        now = datetime.now()
+        q.push(Notification("p1", Urgency.PASSIVE, "test", now))
+        q.push(Notification("g1", Urgency.GENTLE, "test", now))
+        q.push(Notification("a1", Urgency.ACTIVE, "test", now))
+        q.push(Notification("p2", Urgency.PASSIVE, "test", now))
+
+        taken = q.get_passive_and_gentle()
+        assert len(taken) == 3
+        assert {n.message for n in taken} == {"p1", "g1", "p2"}
+        # Only ACTIVE should remain
+        assert q.size() == 1
+        notif = q.get_next_urgent()
+        assert notif is not None
+        assert notif.message == "a1"
+        assert notif.urgency == Urgency.ACTIVE
+
+    def test_get_passive_and_gentle_empty_queue(self):
+        """get_passive_and_gentle on empty queue returns empty list."""
+        q = NotificationQueue()
+        assert q.get_passive_and_gentle() == []
+
+    def test_get_passive_and_gentle_only_active(self):
+        """get_passive_and_gentle with only ACTIVE returns empty, keeps ACTIVE."""
+        q = NotificationQueue()
+        q.push(Notification("a", Urgency.ACTIVE, "test", datetime.now()))
+        taken = q.get_passive_and_gentle()
+        assert taken == []
         assert q.size() == 1
 
     def test_get_next_urgent_returns_highest_first(self):

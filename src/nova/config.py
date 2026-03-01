@@ -83,6 +83,10 @@ class NovaConfig(BaseSettings):
     sleep_reminder_enabled: bool = True
     ambient_presence_threshold: float = 0.005  # RMS below = likely away
 
+    # Custom sounds
+    custom_sounds_enabled: bool = True
+    custom_sounds_dir: str = "sounds"  # Relative to project root, or absolute path
+
     # Notification audio
     chime_volume: float = 0.3  # 0.0-1.0
     alert_volume: float = 0.5

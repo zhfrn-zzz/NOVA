@@ -1,5 +1,6 @@
 """Tests for HeartbeatScheduler — reminder scanning, rules, and urgency logic."""
 
+import logging
 import time
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
@@ -60,7 +61,7 @@ def scheduler(mock_store, queue, mock_config):
 
 class TestCheckReminders:
     def test_pending_reminder_pushed_to_queue(self, scheduler, mock_store, queue):
-        """Pending reminder should be pushed to queue with correct urgency."""
+        """Pending reminder should be pushed to queue with dynamic urgency."""
         now = datetime(2026, 3, 1, 14, 0)  # 2pm, not quiet hours
         mock_store.get_pending_reminders.return_value = [{
             "id": 1,
@@ -77,7 +78,7 @@ class TestCheckReminders:
         assert queue.size() == 1
         notif = queue.get_next_urgent()
         assert notif.message == "Ujian"
-        assert notif.urgency == Urgency.GENTLE
+        assert notif.urgency == Urgency.ACTIVE  # 3 min away → ACTIVE
         assert notif.source == "reminder"
         assert notif.reminder_id == 1
         mock_store.mark_reminder_delivered.assert_called_once_with(1)
@@ -142,6 +143,137 @@ class TestCheckReminders:
         mock_store.schedule_next_recurrence.assert_called_once_with(reminder)
 
 
+# ── Dynamic Urgency ──────────────────────────────────────────────────
+
+
+class TestDynamicUrgency:
+    def test_due_in_2_min_is_active(self, scheduler, mock_store, queue):
+        """Reminder due in 2 min → ACTIVE (alert + speak)."""
+        now = datetime(2026, 3, 1, 14, 0)
+        mock_store.get_pending_reminders.return_value = [{
+            "id": 1,
+            "message": "Minum air",
+            "remind_at": now + timedelta(minutes=2),
+            "lead_time": 0,
+            "is_alarm": False,
+            "urgency": 2,
+            "recurring": None,
+        }]
+
+        scheduler._check_reminders(now)
+
+        notif = queue.get_next_urgent()
+        assert notif is not None
+        assert notif.urgency == Urgency.ACTIVE
+
+    def test_due_in_15_min_is_gentle(self, scheduler, mock_store, queue):
+        """Reminder due in 15 min → GENTLE (chime + listen)."""
+        now = datetime(2026, 3, 1, 14, 0)
+        mock_store.get_pending_reminders.return_value = [{
+            "id": 2,
+            "message": "Meeting soon",
+            "remind_at": now + timedelta(minutes=15),
+            "lead_time": 0,
+            "is_alarm": False,
+            "urgency": 2,
+            "recurring": None,
+        }]
+
+        scheduler._check_reminders(now)
+
+        notif = queue.get_next_urgent()
+        assert notif is not None
+        assert notif.urgency == Urgency.GENTLE
+
+    def test_past_due_is_active(self, scheduler, mock_store, queue):
+        """Reminder past due (time_until < 0) → ACTIVE."""
+        now = datetime(2026, 3, 1, 14, 0)
+        mock_store.get_pending_reminders.return_value = [{
+            "id": 3,
+            "message": "Overdue",
+            "remind_at": now - timedelta(minutes=1),
+            "lead_time": 0,
+            "is_alarm": False,
+            "urgency": 2,
+            "recurring": None,
+        }]
+
+        scheduler._check_reminders(now)
+
+        notif = queue.get_next_urgent()
+        assert notif is not None
+        assert notif.urgency == Urgency.ACTIVE
+
+    def test_due_in_45_min_is_passive(self, scheduler, mock_store, queue):
+        """Reminder due in 45 min → PASSIVE (next interaction)."""
+        now = datetime(2026, 3, 1, 14, 0)
+        mock_store.get_pending_reminders.return_value = [{
+            "id": 4,
+            "message": "Later",
+            "remind_at": now + timedelta(minutes=45),
+            "lead_time": 0,
+            "is_alarm": False,
+            "urgency": 2,
+            "recurring": None,
+        }]
+
+        scheduler._check_reminders(now)
+
+        passive = queue.get_passive()
+        assert len(passive) == 1
+        assert passive[0].urgency == Urgency.PASSIVE
+
+    def test_exactly_5_min_is_active(self, scheduler, mock_store, queue):
+        """Reminder due in exactly 5 min → ACTIVE (boundary)."""
+        now = datetime(2026, 3, 1, 14, 0)
+        mock_store.get_pending_reminders.return_value = [{
+            "id": 5,
+            "message": "Boundary",
+            "remind_at": now + timedelta(minutes=5),
+            "lead_time": 0,
+            "is_alarm": False,
+            "urgency": 2,
+            "recurring": None,
+        }]
+
+        scheduler._check_reminders(now)
+
+        notif = queue.get_next_urgent()
+        assert notif is not None
+        assert notif.urgency == Urgency.ACTIVE
+
+    def test_exactly_30_min_is_gentle(self, scheduler, mock_store, queue):
+        """Reminder due in exactly 30 min → GENTLE (boundary)."""
+        now = datetime(2026, 3, 1, 14, 0)
+        mock_store.get_pending_reminders.return_value = [{
+            "id": 6,
+            "message": "Boundary30",
+            "remind_at": now + timedelta(minutes=30),
+            "lead_time": 0,
+            "is_alarm": False,
+            "urgency": 2,
+            "recurring": None,
+        }]
+
+        scheduler._check_reminders(now)
+
+        notif = queue.get_next_urgent()
+        assert notif is not None
+        assert notif.urgency == Urgency.GENTLE
+
+    def test_calculate_dynamic_urgency_directly(self):
+        """Test the static method directly."""
+        assert HeartbeatScheduler._calculate_dynamic_urgency(-5) == Urgency.ACTIVE
+        assert HeartbeatScheduler._calculate_dynamic_urgency(0) == Urgency.ACTIVE
+        assert HeartbeatScheduler._calculate_dynamic_urgency(3) == Urgency.ACTIVE
+        assert HeartbeatScheduler._calculate_dynamic_urgency(5) == Urgency.ACTIVE
+        assert HeartbeatScheduler._calculate_dynamic_urgency(5.1) == Urgency.GENTLE
+        assert HeartbeatScheduler._calculate_dynamic_urgency(15) == Urgency.GENTLE
+        assert HeartbeatScheduler._calculate_dynamic_urgency(30) == Urgency.GENTLE
+        assert HeartbeatScheduler._calculate_dynamic_urgency(30.1) == Urgency.PASSIVE
+        assert HeartbeatScheduler._calculate_dynamic_urgency(60) == Urgency.PASSIVE
+
+
 # ── Ambient Noise Gate ────────────────────────────────────────────────
 
 
@@ -174,7 +306,7 @@ class TestAmbientGate:
         assert passive[0].urgency == Urgency.PASSIVE
 
     def test_normal_ambient_keeps_urgency(self, mock_store, queue, mock_config):
-        """Normal ambient RMS should keep original urgency."""
+        """Normal ambient RMS should keep dynamic urgency."""
         ambient_fn = MagicMock(return_value=0.02)  # user present
         sched = HeartbeatScheduler(
             memory_store=mock_store,
@@ -187,7 +319,7 @@ class TestAmbientGate:
         mock_store.get_pending_reminders.return_value = [{
             "id": 6,
             "message": "Test",
-            "remind_at": now + timedelta(minutes=1),
+            "remind_at": now + timedelta(minutes=15),  # 15 min → GENTLE
             "lead_time": 5,
             "is_alarm": False,
             "urgency": 2,
@@ -315,6 +447,43 @@ class TestTick:
             cr.assert_called_once()
             cbr.assert_called_once()
             mrd.assert_called_once()
+
+
+# ── Debug Logging ──────────────────────────────────────────────────────
+
+
+class TestDebugLogging:
+    def test_check_reminders_logs_tick(self, scheduler, mock_store, caplog):
+        """_check_reminders should log tick and result count."""
+        now = datetime(2026, 3, 1, 14, 0)
+        with caplog.at_level(logging.DEBUG, logger="nova.heartbeat.scheduler"):
+            scheduler._check_reminders(now)
+
+        assert "Heartbeat tick: checking reminders" in caplog.text
+        assert "Found 0 pending reminders" in caplog.text
+
+    def test_check_reminders_logs_push(self, scheduler, mock_store, queue, caplog):
+        """When a reminder is pushed, it should log with ID and urgency."""
+        now = datetime(2026, 3, 1, 14, 0)
+        mock_store.get_pending_reminders.return_value = [{
+            "id": 10,
+            "message": "Test log",
+            "remind_at": now + timedelta(minutes=1),  # 1 min → ACTIVE
+            "lead_time": 0,
+            "is_alarm": False,
+            "urgency": 2,
+            "recurring": None,
+        }]
+        with caplog.at_level(logging.DEBUG, logger="nova.heartbeat.scheduler"):
+            scheduler._check_reminders(now)
+
+        assert "Found 1 pending reminders" in caplog.text
+        assert "Pushed reminder #10 to queue (urgency=ACTIVE)" in caplog.text
+
+    def test_scheduler_and_queue_share_identity(self, scheduler, queue):
+        """Scheduler's internal queue must be the same object as the fixture queue."""
+        assert scheduler._queue is queue
+        assert id(scheduler._queue) == id(queue)
 
 
 # ── Thread Lifecycle ──────────────────────────────────────────────────
