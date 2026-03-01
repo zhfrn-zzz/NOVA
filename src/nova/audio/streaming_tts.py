@@ -19,6 +19,33 @@ from nova.audio.playback import play_audio
 
 logger = logging.getLogger(__name__)
 
+# Regex patterns for stripping markdown before TTS
+_MD_BOLD = re.compile(r'\*\*(.+?)\*\*')
+_MD_ITALIC = re.compile(r'\*(.+?)\*')
+_MD_BULLET = re.compile(r'^[*\-•]\s+', re.MULTILINE)
+_MD_HEADER = re.compile(r'^#{1,6}\s+', re.MULTILINE)
+_MD_CODE = re.compile(r'`(.+?)`')
+
+
+def _strip_markdown(text: str) -> str:
+    """Remove markdown formatting for TTS output.
+
+    Strips bold, italic, bullets, headers, and inline code so that
+    TTS engines don't read out asterisks or hashes.
+
+    Args:
+        text: Raw text possibly containing markdown.
+
+    Returns:
+        Plain text suitable for speech synthesis.
+    """
+    text = _MD_BOLD.sub(r'\1', text)
+    text = _MD_ITALIC.sub(r'\1', text)
+    text = _MD_BULLET.sub('', text)
+    text = _MD_HEADER.sub('', text)
+    text = _MD_CODE.sub(r'\1', text)
+    return text
+
 # Abbreviations that end with a period but are NOT sentence boundaries.
 # Covers Indonesian and English common abbreviations.
 _ABBREVIATIONS = {
@@ -149,7 +176,7 @@ class StreamingTTSPlayer:
             for i, sentence in enumerate(sentences):
                 try:
                     audio = await tts_router.execute(
-                        "synthesize", sentence, language,
+                        "synthesize", _strip_markdown(sentence), language,
                     )
                     if i == 0 and first_audio_time is None:
                         first_audio_time = time.perf_counter() - tts_start
@@ -199,7 +226,9 @@ class StreamingTTSPlayer:
         """Fast path for single-sentence responses (no queue overhead)."""
         start = time.perf_counter()
         try:
-            audio = await tts_router.execute("synthesize", text, language)
+            audio = await tts_router.execute(
+                "synthesize", _strip_markdown(text), language,
+            )
             synth_time = time.perf_counter() - start
             logger.info(
                 "TTS single sentence: %.2fs (%d bytes)",
@@ -261,7 +290,7 @@ class StreamingTTSPlayer:
 
                     try:
                         audio = await tts_router.execute(
-                            "synthesize", sentence, detected_lang,
+                            "synthesize", _strip_markdown(sentence), detected_lang,
                         )
                         if i == 0 and first_audio_time is None:
                             first_audio_time = time.perf_counter() - tts_start

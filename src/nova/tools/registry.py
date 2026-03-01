@@ -26,6 +26,7 @@ from nova.tools import (
     system_control,
     system_info,
     time_date,
+    weather,
     web_search,
 )
 
@@ -742,6 +743,31 @@ _FUNCTION_DECLARATIONS = [
             "properties": {},
         },
     ),
+    # ── Weather ─────────────────────────────────────────────────────
+    types.FunctionDeclaration(
+        name="get_weather",
+        description=(
+            "Ambil data prakiraan cuaca. Gunakan saat user bertanya tentang cuaca, "
+            "suhu, hujan, atau kondisi luar. "
+            "Contoh: 'cuaca hari ini', 'besok hujan nggak', 'weather in Tokyo', "
+            "'prakiraan cuaca minggu ini'."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {
+                "location": {
+                    "type": "string",
+                    "description": (
+                        "Nama kota. Kosongkan untuk Bekasi (lokasi default user)."
+                    ),
+                },
+                "days": {
+                    "type": "integer",
+                    "description": "Jumlah hari prakiraan (1-7, default 3).",
+                },
+            },
+        },
+    ),
 ]
 
 # Map function names → async callables
@@ -812,6 +838,8 @@ _TOOL_IMPLEMENTATIONS: dict[str, object] = {
     "skip_track": music_player.skip_track,
     "previous_music_track": music_player.previous_music_track,
     "stop_music": music_player.stop_music,
+    # Weather
+    "get_weather": weather.get_weather,
 }
 
 

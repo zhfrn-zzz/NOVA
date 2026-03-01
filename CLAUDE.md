@@ -112,6 +112,7 @@ nova/
 │       │   ├── dictation.py      # Type text into active window (pyautogui)
 │       │   ├── display_control.py # Brightness up/down/get (screen-brightness-control)
 │       │   ├── network_control.py # Wi-Fi on/off/status (netsh/nmcli)
+│       │   ├── weather.py        # Open-Meteo weather forecast (free, no API key)
 │       │   ├── web_search.py     # DuckDuckGo / SearXNG
 │       │   ├── music_player.py   # YouTube Music playback via yt-dlp + media keys
 │       │   └── time_date.py      # Local time/date
@@ -147,7 +148,8 @@ nova/
 │   ├── test_heartbeat_data.py        # Phase 4: Heartbeat data layer
 │   ├── test_heartbeat_scheduler.py   # Phase 4: Heartbeat scheduler
 │   ├── test_heartbeat_audio.py       # Phase 4: Audio generation
-│   └── test_sound_loader.py         # Phase 4: Custom sound loader
+│   ├── test_sound_loader.py         # Phase 4: Custom sound loader
+│   └── test_weather.py             # Phase 2: Weather tool
 └── scripts/
     ├── setup.sh                  # Full dependency install script
     └── nova.service              # systemd auto-start
@@ -203,6 +205,7 @@ nova/
 - [x] Task 44: Text-only GENTLE delivery — GENTLE notifications injected into LLM context in text-only mode instead of printing separate 🔔 line (Phase 4)
 - [x] Task 45: Dynamic urgency — scheduler auto-calculates urgency from time proximity: <=5min ACTIVE, <=30min GENTLE, >30min PASSIVE (Phase 4)
 - [x] Task 46: Custom sounds — ~/.nova/sounds/ for beep/chime/alert overrides, soundfile loading with stereo-to-mono + resampling, cached, config toggle (Phase 4)
+- [x] Task 47: Weather tool — Open-Meteo API (free, no key), get_weather with geocoding, WMO codes in Indonesian, default Bekasi (Phase 2)
 
 ## Important Notes
 

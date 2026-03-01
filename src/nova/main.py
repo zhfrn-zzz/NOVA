@@ -525,6 +525,7 @@ async def _wake_word_mode(orchestrator, force_hotkey: bool = False) -> None:
 
     exit_task = asyncio.create_task(_exit_listener())
 
+    activation_task = None
     try:
         while not exit_event.is_set():
             # --- Check heartbeat notification queue ---
@@ -532,10 +533,12 @@ async def _wake_word_mode(orchestrator, force_hotkey: bool = False) -> None:
                 orchestrator, detector, config,
             )
             if handled:
+                activation_task = None  # reset after notification handling
                 continue  # Re-check queue before waiting for wake word
 
-            # Wait for either hotkey activation or exit
-            activation_task = asyncio.create_task(detector.wait_for_activation())
+            # Reuse existing activation task if still running
+            if activation_task is None or activation_task.done():
+                activation_task = asyncio.create_task(detector.wait_for_activation())
 
             done, pending = await asyncio.wait(
                 [activation_task, exit_task],
@@ -544,12 +547,9 @@ async def _wake_word_mode(orchestrator, force_hotkey: bool = False) -> None:
             )
 
             # Timeout — no wake word, no exit. Loop back to check queue.
+            # DON'T cancel activation_task — keep it running so wake word
+            # detection isn't lost.
             if not done:
-                activation_task.cancel()
-                try:
-                    await activation_task
-                except asyncio.CancelledError:
-                    pass
                 continue
 
             # Cancel pending tasks
@@ -607,6 +607,12 @@ async def _wake_word_mode(orchestrator, force_hotkey: bool = False) -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        if activation_task and not activation_task.done():
+            activation_task.cancel()
+            try:
+                await activation_task
+            except asyncio.CancelledError:
+                pass
         detector.stop()
         orchestrator.stop()
         exit_task.cancel()

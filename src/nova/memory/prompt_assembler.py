@@ -59,6 +59,12 @@ Examples:
 - '1 jam lagi' → delay_minutes=60
 For absolute times ('besok jam 8', 'jam 3 sore'), use remind_at with ISO 8601.
 "besok jam 8" with current date 2026-03-01 → "2026-03-02T08:00:00".
+
+Weather:
+- When user asks about weather, cuaca, hujan, or temperature, use get_weather.
+- Default location is Bekasi. Only specify location if user asks about another city.
+- Summarize the weather data naturally, don't read raw numbers.
+- Example: "Besok diprediksi hujan dengan kemungkinan 80%, suhu 24-32 derajat."
 """
 
 _DEFAULT_USER = """\
