@@ -114,6 +114,9 @@ nova/
 │       │   ├── web_search.py     # DuckDuckGo / SearXNG
 │       │   ├── music_player.py   # YouTube Music playback via yt-dlp + media keys
 │       │   └── time_date.py      # Local time/date
+│       ├── heartbeat/
+│       │   ├── __init__.py
+│       │   └── queue.py          # NotificationQueue, Notification, Urgency
 │       ├── memory/
 │       │   ├── __init__.py
 │       │   ├── context.py            # Legacy sliding window (backward compat)
@@ -137,7 +140,8 @@ nova/
 │   ├── test_memory_store.py          # Phase 3
 │   ├── test_conversation_manager.py  # Phase 3
 │   ├── test_retriever.py             # Phase 3
-│   └── test_embeddings.py            # Phase 3
+│   ├── test_embeddings.py            # Phase 3
+│   └── test_heartbeat_data.py        # Phase 4: Heartbeat
 └── scripts/
     ├── setup.sh                  # Full dependency install script
     └── nova.service              # systemd auto-start
@@ -186,6 +190,7 @@ nova/
 - [x] Task 36: Gemini embedding integration — GeminiEmbedder with circuit breaker, auto-embed on store, backfill, hybrid retrieval wired into orchestrator (Phase 3)
 - [x] Task 37: FTS5 query sanitization — strip special chars before MATCH, skip short queries in retriever, embed log visibility (Phase 3)
 - [x] Task 38: Unified streaming-with-tools — merged dual-path into single streaming path with inline function calling, removed keyword heuristics (Phase 3)
+- [x] Task 39: Heartbeat data layer — reminders table, notification queue, set/list/cancel reminder tools, RULES.md update (Phase 4)
 
 ## Important Notes
 

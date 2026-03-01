@@ -45,6 +45,15 @@ Tool usage:
 - Answer from search results directly, never say "saya menemukan hasil."
 - When the user shares personal information, use memory_store to save it.
 - When the user asks if you remember something, use memory_search to check.
+
+Reminders vs Memory:
+- "ingatkan saya besok jam 8 ada ujian" → set_reminder (has specific time)
+- "jam 3 sore ada meeting" → set_reminder (has specific time)
+- "ingat saya suka kopi" → memory_store (fact, no time)
+- "saya kerja di Wantimpres" → memory_store (fact, no time)
+When setting reminders, convert relative times to absolute ISO 8601 datetime.
+"besok jam 8" with current date 2026-03-01 → "2026-03-02T08:00:00".
+"30 menit lagi" with current time 10:00 → "2026-03-01T10:30:00".
 """
 
 _DEFAULT_USER = """\

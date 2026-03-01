@@ -81,6 +81,23 @@ CREATE TABLE IF NOT EXISTS sessions (
     summary     TEXT,
     token_count INTEGER DEFAULT 0
 );
+
+-- Heartbeat reminders (time-based notifications)
+CREATE TABLE IF NOT EXISTS reminders (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    message     TEXT NOT NULL,
+    remind_at   TEXT NOT NULL,
+    lead_time   INTEGER DEFAULT 5,
+    is_alarm    BOOLEAN DEFAULT 0,
+    urgency     INTEGER DEFAULT 2,
+    recurring   TEXT,
+    delivered   BOOLEAN DEFAULT 0,
+    created_at  TEXT NOT NULL,
+    delivered_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_reminders_pending
+    ON reminders(remind_at) WHERE delivered = 0;
 """
 
 # FTS5 tables created separately (can't use IF NOT EXISTS with virtual tables)
@@ -602,6 +619,195 @@ class MemoryStore:
             md_path.write_text("\n".join(lines), encoding="utf-8")
         except OSError as e:
             logger.warning("Failed to sync MEMORY.md: %s", e)
+
+    # --- Reminder CRUD (Heartbeat) ---
+
+    def add_reminder(
+        self,
+        message: str,
+        remind_at: str,
+        lead_time: int = 5,
+        is_alarm: bool = False,
+        urgency: int = 2,
+        recurring: str | None = None,
+    ) -> int:
+        """Add a new reminder.
+
+        Args:
+            message: Reminder text.
+            remind_at: ISO 8601 datetime string.
+            lead_time: Minutes before remind_at to notify.
+            is_alarm: If True, bypasses quiet hours.
+            urgency: 1=passive, 2=gentle, 3=active.
+            recurring: null | "daily" | "weekly" | "weekdays".
+
+        Returns:
+            The reminder ID.
+        """
+        now = datetime.now().isoformat()
+        cursor = self._conn.execute(
+            "INSERT INTO reminders "
+            "(message, remind_at, lead_time, is_alarm, urgency, recurring, "
+            "created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (message, remind_at, lead_time, int(is_alarm), urgency,
+             recurring, now),
+        )
+        self._conn.commit()
+        logger.info(
+            "Reminder added (#%d): '%s' at %s",
+            cursor.lastrowid, message, remind_at,
+        )
+        return cursor.lastrowid  # type: ignore[return-value]
+
+    def get_pending_reminders(
+        self, now: datetime, window_minutes: int = 2,
+    ) -> list[dict]:
+        """Get reminders due within the scan window.
+
+        A reminder is due when:
+            remind_at - lead_time <= now + window_minutes
+
+        Args:
+            now: Current datetime.
+            window_minutes: Look-ahead window in minutes.
+
+        Returns:
+            List of reminder dicts with parsed remind_at as datetime.
+        """
+        now_str = now.isoformat()
+        rows = self._conn.execute(
+            """
+            SELECT id, message, remind_at, lead_time, is_alarm,
+                   urgency, recurring
+            FROM reminders
+            WHERE delivered = 0
+              AND datetime(remind_at, '-' || lead_time || ' minutes')
+                  <= datetime(?, '+' || ? || ' minutes')
+            ORDER BY remind_at ASC
+            """,
+            (now_str, window_minutes),
+        ).fetchall()
+
+        results = []
+        for row in rows:
+            results.append({
+                "id": row["id"],
+                "message": row["message"],
+                "remind_at": datetime.fromisoformat(row["remind_at"]),
+                "lead_time": row["lead_time"],
+                "is_alarm": bool(row["is_alarm"]),
+                "urgency": row["urgency"],
+                "recurring": row["recurring"],
+            })
+        return results
+
+    def mark_reminder_delivered(self, reminder_id: int) -> None:
+        """Mark a reminder as delivered.
+
+        Args:
+            reminder_id: ID of the reminder to mark.
+        """
+        now = datetime.now().isoformat()
+        self._conn.execute(
+            "UPDATE reminders SET delivered = 1, delivered_at = ? WHERE id = ?",
+            (now, reminder_id),
+        )
+        self._conn.commit()
+
+    def cancel_reminder(self, reminder_id: int) -> bool:
+        """Cancel (delete) a reminder by ID.
+
+        Args:
+            reminder_id: ID of the reminder to cancel.
+
+        Returns:
+            True if the reminder was found and deleted.
+        """
+        cursor = self._conn.execute(
+            "DELETE FROM reminders WHERE id = ?", (reminder_id,),
+        )
+        self._conn.commit()
+        if cursor.rowcount > 0:
+            logger.info("Reminder #%d cancelled", reminder_id)
+            return True
+        return False
+
+    def list_reminders(self, include_delivered: bool = False) -> list[dict]:
+        """List all reminders.
+
+        Args:
+            include_delivered: If True, include delivered reminders.
+
+        Returns:
+            List of reminder dicts.
+        """
+        if include_delivered:
+            rows = self._conn.execute(
+                "SELECT id, message, remind_at, lead_time, is_alarm, "
+                "urgency, recurring, delivered, created_at, delivered_at "
+                "FROM reminders ORDER BY remind_at ASC",
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT id, message, remind_at, lead_time, is_alarm, "
+                "urgency, recurring, delivered, created_at, delivered_at "
+                "FROM reminders WHERE delivered = 0 ORDER BY remind_at ASC",
+            ).fetchall()
+
+        return [
+            {
+                "id": r["id"],
+                "message": r["message"],
+                "remind_at": r["remind_at"],
+                "lead_time": r["lead_time"],
+                "is_alarm": bool(r["is_alarm"]),
+                "urgency": r["urgency"],
+                "recurring": r["recurring"],
+                "delivered": bool(r["delivered"]),
+            }
+            for r in rows
+        ]
+
+    def schedule_next_recurrence(self, reminder: dict) -> int | None:
+        """Schedule the next occurrence of a recurring reminder.
+
+        Args:
+            reminder: Reminder dict with recurring, remind_at, etc.
+
+        Returns:
+            New reminder ID, or None if not recurring.
+        """
+        recurring = reminder.get("recurring")
+        if not recurring:
+            return None
+
+        from datetime import timedelta
+
+        remind_at = reminder["remind_at"]
+        if isinstance(remind_at, str):
+            remind_at = datetime.fromisoformat(remind_at)
+
+        if recurring == "daily":
+            next_at = remind_at + timedelta(days=1)
+        elif recurring == "weekly":
+            next_at = remind_at + timedelta(days=7)
+        elif recurring == "weekdays":
+            next_at = remind_at + timedelta(days=1)
+            # Skip Saturday (5) and Sunday (6)
+            while next_at.weekday() in (5, 6):
+                next_at += timedelta(days=1)
+        else:
+            logger.warning("Unknown recurring type: %s", recurring)
+            return None
+
+        return self.add_reminder(
+            message=reminder["message"],
+            remind_at=next_at.isoformat(),
+            lead_time=reminder.get("lead_time", 5),
+            is_alarm=reminder.get("is_alarm", False),
+            urgency=reminder.get("urgency", 2),
+            recurring=recurring,
+        )
 
     # --- Cleanup ---
 

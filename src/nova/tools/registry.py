@@ -19,10 +19,10 @@ from nova.memory.persistent import (
 from nova.tools import (
     dictation,
     display_control,
+    heartbeat_reminders,
     music_player,
     network_control,
     notes,
-    reminders,
     system_control,
     system_info,
     time_date,
@@ -501,29 +501,78 @@ _FUNCTION_DECLARATIONS = [
             "properties": {},
         },
     ),
-    # ── Reminders ────────────────────────────────────────────────────
+    # ── Reminders (Heartbeat) ────────────────────────────────────────
     types.FunctionDeclaration(
         name="set_reminder",
         description=(
-            "Set a reminder that will speak a message and show a notification after "
-            "the specified number of minutes. Use when the user says "
-            "'ingatkan saya 5 menit lagi', 'remind me in 10 minutes', "
-            "'set reminder', 'ingatkan untuk istirahat', or similar. "
-            "Convert the time to minutes."
+            "Set a reminder at a specific date and time. Use when the user says "
+            "'ingatkan saya besok jam 8', 'remind me at 3 PM', 'jam 3 sore ada meeting', "
+            "'set reminder', 'ingatkan untuk istirahat jam 5', or similar. "
+            "Convert relative times to absolute ISO 8601 datetime. "
+            "Example: 'besok jam 8' with today 2026-03-01 → '2026-03-02T08:00:00'. "
+            "'30 menit lagi' with now 10:00 → '2026-03-01T10:30:00'."
         ),
         parameters_json_schema={
             "type": "object",
             "properties": {
-                "minutes": {
-                    "type": "integer",
-                    "description": "Minutes from now until the reminder fires.",
-                },
                 "message": {
                     "type": "string",
-                    "description": "The reminder message to speak and display.",
+                    "description": "The reminder message.",
+                },
+                "remind_at": {
+                    "type": "string",
+                    "description": (
+                        "ISO 8601 datetime for when to remind, "
+                        "e.g. '2026-03-02T08:00:00'."
+                    ),
+                },
+                "lead_time": {
+                    "type": "integer",
+                    "description": "Minutes before remind_at to notify (default 5).",
+                },
+                "is_alarm": {
+                    "type": "boolean",
+                    "description": "If true, bypasses quiet hours (default false).",
+                },
+                "recurring": {
+                    "type": "string",
+                    "description": (
+                        "Recurrence pattern: 'daily', 'weekly', 'weekdays', "
+                        "or omit for one-time reminder."
+                    ),
                 },
             },
-            "required": ["minutes", "message"],
+            "required": ["message", "remind_at"],
+        },
+    ),
+    types.FunctionDeclaration(
+        name="list_reminders",
+        description=(
+            "List all pending (active) reminders. Use when the user asks "
+            "'lihat reminder', 'reminder apa saja', 'show reminders', "
+            "'ada reminder apa', or similar."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    types.FunctionDeclaration(
+        name="cancel_reminder",
+        description=(
+            "Cancel a reminder by its ID number. Use when the user says "
+            "'batalkan reminder 1', 'cancel reminder #2', 'hapus reminder', or similar. "
+            "If the user doesn't specify an ID, list reminders first."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {
+                "reminder_id": {
+                    "type": "integer",
+                    "description": "The reminder ID to cancel.",
+                },
+            },
+            "required": ["reminder_id"],
         },
     ),
     # ── Dictation ────────────────────────────────────────────────────
@@ -736,8 +785,10 @@ _TOOL_IMPLEMENTATIONS: dict[str, object] = {
     "add_note": notes.add_note,
     "get_notes": notes.get_notes,
     "clear_notes": notes.clear_notes,
-    # Reminders
-    "set_reminder": reminders.set_reminder,
+    # Reminders (Heartbeat)
+    "set_reminder": heartbeat_reminders.set_reminder,
+    "list_reminders": heartbeat_reminders.list_reminders,
+    "cancel_reminder": heartbeat_reminders.cancel_reminder,
     # Dictation
     "dictate": dictation.dictate,
     # Display / Brightness
