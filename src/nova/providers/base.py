@@ -100,15 +100,18 @@ class LLMProvider(ABC):
         """
 
     @abstractmethod
-    async def generate_stream(self, prompt: str, context: list[dict]) -> AsyncIterator[str]:
-        """Stream a response token-by-token.
+    async def generate_stream(
+        self, prompt: str, context: list[dict], tools: list | None = None,
+    ) -> AsyncIterator[str]:
+        """Stream a response, handling tool calls inline if tools are provided.
 
         Args:
             prompt: The user's current message.
             context: List of prior exchanges.
+            tools: Optional list of tool declarations for function calling.
 
         Yields:
-            Response text chunks as they arrive.
+            Complete sentences as they are detected in the token stream.
         """
 
     @abstractmethod

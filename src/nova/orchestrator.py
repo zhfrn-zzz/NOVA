@@ -1,10 +1,9 @@
 """Core pipeline orchestrator — coordinates STT, LLM, TTS, and context.
 
-Supports two response paths:
-- Streaming: LLM streams sentences → TTS synthesizes each immediately → play.
-  Used for conversational queries. Lowest time-to-first-audio.
-- Tool: LLM generates full response with function calling → TTS streams.
-  Used when the query likely needs tools (time, volume, search, etc.).
+Uses a single unified streaming path: the LLM always streams with tools
+enabled.  When the model decides to call a function, tool execution
+happens inline inside ``generate_stream()`` — no keyword heuristics
+needed.
 """
 
 import asyncio
@@ -32,40 +31,6 @@ from nova.providers.tts.google_cloud_tts import GoogleCloudTTSProvider
 from nova.tools.registry import get_tool_declarations
 
 logger = logging.getLogger(__name__)
-
-# Keywords that indicate the query likely needs tool/function calling.
-# When detected, the orchestrator uses the non-streaming tool path.
-# Matching uses prefix/stem comparison so Indonesian suffixed words
-# like "lagunya", "putarkan", "musiknya" still match their roots.
-_TOOL_KEYWORDS = {
-    # Time/date
-    "jam", "waktu", "time", "tanggal", "date",
-    # System control
-    "volume", "mute", "unmute", "screenshot", "timer",
-    "shutdown", "restart", "lock", "sleep", "hibernate",
-    "matikan", "kunci", "tidurkan", "tangkap",
-    # App control
-    "buka", "tutup", "open",
-    # System info
-    "baterai", "battery", "ram", "storage", "disk", "uptime", "ip",
-    "penyimpanan", "menyala", "address",
-    # Notes & reminders
-    "catat", "catatan", "notes", "note", "ingatkan", "reminder",
-    "hapus",
-    # Display & network
-    "brightness", "kecerahan", "wifi", "terang", "redup",
-    # Web search
-    "cari", "search", "google", "berita", "cuaca", "news", "weather",
-    # Memory
-    "ingat", "remember", "lupakan", "forget", "profil",
-    # Media
-    "play", "pause", "next", "previous", "stop",
-    # Music
-    "putar", "puterin", "lagu", "musik", "music", "song", "skip",
-    "judul", "mainkan", "nyalakan",
-    # Dictation
-    "ketik", "dictate", "tulis",
-}
 
 # Simple greetings — skip memory retrieval for these
 _GREETINGS = {
@@ -235,36 +200,18 @@ class Orchestrator:
         except Exception:
             logger.debug("TTS warmup failed (non-critical)")
 
-    def _likely_needs_tools(self, text: str) -> bool:
-        """Heuristic: does this query likely need tool/function calls?
-
-        Checks for keywords associated with NOVA's tools (time, volume,
-        search, etc.) using prefix matching so Indonesian suffixed words
-        like "lagunya", "putarkan", "musiknya" are correctly detected.
-
-        Errs toward False — conversational queries get the faster
-        streaming path; missed tool queries still work via the model's
-        text response (just without tool results).
-        """
-        words = re.sub(r"[^\w\s]", "", text.lower()).split()
-        for word in words:
-            for keyword in _TOOL_KEYWORDS:
-                # Prefix match: "lagunya".startswith("lagu") → True
-                # Also exact: "lagu".startswith("lagu") → True
-                if word.startswith(keyword) and len(keyword) >= 3:
-                    return True
-                # Exact match for short keywords (2 chars like "ip")
-                if len(keyword) < 3 and word == keyword:
-                    return True
-        return False
-
-    async def _respond_streaming(
+    async def _respond(
         self, user_input: str,
     ) -> tuple[str, float] | None:
-        """Streaming path: LLM stream → TTS stream.
+        """Unified streaming path: LLM stream (with tools) → TTS stream.
+
+        The LLM provider streams with tools enabled.  If the model emits a
+        function call, it is executed inline inside ``generate_stream()`` and
+        a new stream is started with the tool result — all transparent to
+        the caller.
 
         Returns (response_text, total_time) or None if streaming fails.
-        Falls back gracefully so the caller can retry with the tool path.
+        Falls back gracefully so the caller can retry with the fallback path.
         """
         # Inject memory context into prompt assembler
         memory_context = await self._get_memory_context(user_input)
@@ -276,7 +223,9 @@ class Orchestrator:
 
         try:
             start = time.perf_counter()
-            sentence_stream = provider.generate_stream(user_input, context)
+            sentence_stream = provider.generate_stream(
+                user_input, context, tools=self._tools,
+            )
             full_text, tts_time = await self._streaming_tts.stream_from_llm(
                 sentence_stream, self._tts_router, language="auto",
             )
@@ -294,10 +243,12 @@ class Orchestrator:
             logger.warning("Streaming path failed, will fall back", exc_info=True)
             return None
 
-    async def _respond_with_tools(
+    async def _respond_fallback(
         self, user_input: str,
     ) -> tuple[str, float]:
-        """Standard tool path: LLM with function calling → streaming TTS.
+        """Non-streaming fallback: LLM with function calling → streaming TTS.
+
+        Used when streaming fails (e.g., provider doesn't support streaming).
 
         Returns (response_text, total_time). Raises on total failure.
         """
@@ -309,7 +260,7 @@ class Orchestrator:
         total = time.perf_counter() - start
 
         logger.info(
-            "Tool response: %.2fs total (LLM: %.2fs, TTS: %.2fs), %d chars",
+            "Fallback response: %.2fs total (LLM: %.2fs, TTS: %.2fs), %d chars",
             total, llm_time, tts_time, len(response),
         )
         return response, total
@@ -370,11 +321,9 @@ class Orchestrator:
     async def handle_interaction(self, user_input: str) -> str:
         """Process a full text interaction: LLM response + TTS playback.
 
-        Routes between two paths:
-        - Streaming: LLM streams sentences → TTS plays each immediately.
-          Used for conversational queries. Lowest time-to-first-audio.
-        - Tool: Full LLM response with function calling → streaming TTS.
-          Used when the query likely needs tools.
+        Uses a single unified streaming path with tools always enabled.
+        The LLM decides whether to call tools — no keyword heuristics.
+        Falls back to non-streaming if streaming fails.
 
         Args:
             user_input: The user's text input.
@@ -389,28 +338,21 @@ class Orchestrator:
         if not self._tts_warmed_up:
             asyncio.ensure_future(self._warmup_tts())
 
-        use_tools = self._likely_needs_tools(user_input)
-
         try:
-            if use_tools:
+            # Primary path: unified streaming with tools
+            result = await self._respond(user_input)
+            if result is not None:
+                response, total_time = result
                 logger.info(
-                    "[#%d] Tool path (keywords detected)", interaction_id,
+                    "[#%d] Streaming path succeeded", interaction_id,
                 )
-                response, total_time = await self._respond_with_tools(user_input)
             else:
-                # Try streaming first; fall back to tools on failure
-                result = await self._respond_streaming(user_input)
-                if result is not None:
-                    response, total_time = result
-                    logger.info(
-                        "[#%d] Streaming path succeeded", interaction_id,
-                    )
-                else:
-                    logger.info(
-                        "[#%d] Streaming failed, falling back to tool path",
-                        interaction_id,
-                    )
-                    response, total_time = await self._respond_with_tools(user_input)
+                # Streaming failed — fall back to non-streaming
+                logger.info(
+                    "[#%d] Streaming failed, falling back to non-streaming",
+                    interaction_id,
+                )
+                response, total_time = await self._respond_fallback(user_input)
 
         except AllProvidersFailedError:
             logger.error("[#%d] All LLM providers failed", interaction_id)
@@ -433,8 +375,7 @@ class Orchestrator:
     async def handle_voice_interaction(self) -> str | None:
         """Process a full voice interaction: capture -> STT -> LLM -> TTS -> playback.
 
-        After STT, routes through the same dual-path as handle_interaction:
-        streaming for conversational queries, tool path for tool queries.
+        Uses the same unified streaming path as handle_interaction.
 
         Returns:
             The assistant's response text, None if no speech, or error string.
@@ -479,18 +420,13 @@ class Orchestrator:
 
         transcript = transcript.strip()
 
-        # 3. LLM → TTS: route through streaming or tool path
-        use_tools = self._likely_needs_tools(transcript)
-
+        # 3. LLM → TTS: unified streaming path with tools
         try:
-            if use_tools:
-                response, _ = await self._respond_with_tools(transcript)
+            result = await self._respond(transcript)
+            if result is not None:
+                response, _ = result
             else:
-                result = await self._respond_streaming(transcript)
-                if result is not None:
-                    response, _ = result
-                else:
-                    response, _ = await self._respond_with_tools(transcript)
+                response, _ = await self._respond_fallback(transcript)
         except AllProvidersFailedError:
             logger.error("[#%d] All LLM providers failed", interaction_id)
             return "Semua layanan sedang sibuk, coba lagi sebentar."

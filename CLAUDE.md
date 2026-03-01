@@ -185,6 +185,7 @@ nova/
 - [x] Task 35: Updated LLM tools — memory_store/search/forget, update_user_profile (Phase 3)
 - [x] Task 36: Gemini embedding integration — GeminiEmbedder with circuit breaker, auto-embed on store, backfill, hybrid retrieval wired into orchestrator (Phase 3)
 - [x] Task 37: FTS5 query sanitization — strip special chars before MATCH, skip short queries in retriever, embed log visibility (Phase 3)
+- [x] Task 38: Unified streaming-with-tools — merged dual-path into single streaming path with inline function calling, removed keyword heuristics (Phase 3)
 
 ## Important Notes
 

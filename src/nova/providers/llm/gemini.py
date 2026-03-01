@@ -287,52 +287,123 @@ class GeminiProvider(LLMProvider):
         return text
 
     async def generate_stream(
-        self, prompt: str, context: list[dict],
+        self, prompt: str, context: list[dict], tools: list | None = None,
     ) -> AsyncIterator[str]:
-        """Stream a response as complete sentences.
+        """Stream a response as complete sentences, with inline tool execution.
 
         Buffers incoming tokens and yields each complete sentence as
         soon as a sentence boundary is detected (. ! ? followed by
         whitespace, or newline). This enables the TTS pipeline to start
         speaking the first sentence before the full response is ready.
 
+        When tools are provided and the model emits a function_call chunk,
+        the stream pauses, the tool is executed, the result is appended
+        to the conversation, and a **new** stream is started to get the
+        model's response that incorporates the tool result.
+
         Args:
             prompt: The user's current message.
             context: Prior exchanges.
+            tools: Optional list of Tool objects for Gemini function calling.
 
         Yields:
             Complete sentences as they are detected in the token stream.
         """
+        import asyncio as _asyncio
+
         client = self._get_client()
         contents = _build_contents(prompt, context)
+        config = self._get_config(tools=tools)
         buffer = ""
+        tool_call_count = 0
 
-        try:
-            stream = await client.aio.models.generate_content_stream(
-                model=self._model_name,
-                contents=contents,
-                config=self._get_config(),
-            )
-            async for chunk in stream:
-                if not chunk.text:
-                    continue
-                buffer += chunk.text
+        while tool_call_count <= _MAX_TOOL_CALLS:
+            function_call = None
 
-                # Extract complete sentences from buffer
-                while True:
-                    sentence, buffer = _extract_sentence(buffer)
-                    if sentence is None:
+            try:
+                stream = await client.aio.models.generate_content_stream(
+                    model=self._model_name,
+                    contents=contents,
+                    config=config,
+                )
+                async for chunk in stream:
+                    # Check for function call in chunk parts
+                    if chunk.candidates and chunk.candidates[0].content.parts:
+                        for part in chunk.candidates[0].content.parts:
+                            if part.function_call:
+                                function_call = part.function_call
+                                break
+                            if part.text:
+                                buffer += part.text
+                                # Extract and yield complete sentences
+                                while True:
+                                    sentence, buffer = _extract_sentence(buffer)
+                                    if sentence is None:
+                                        break
+                                    yield sentence
+                    elif chunk.text:
+                        buffer += chunk.text
+                        while True:
+                            sentence, buffer = _extract_sentence(buffer)
+                            if sentence is None:
+                                break
+                            yield sentence
+
+                    if function_call:
                         break
-                    yield sentence
 
-        except (RateLimitError, ProviderTimeoutError, ProviderError):
-            raise
-        except Exception as e:
-            self._handle_error(e)
-        finally:
-            # Yield any remaining text at end of stream
-            if buffer.strip():
-                yield buffer.strip()
+            except (RateLimitError, ProviderTimeoutError, ProviderError):
+                raise
+            except Exception as e:
+                self._handle_error(e)
+
+            # If no function call, we're done streaming
+            if not function_call:
+                break
+
+            # Execute the tool
+            tool_call_count += 1
+            fn_name = function_call.name
+            fn_args = dict(function_call.args) if function_call.args else {}
+            logger.info(
+                "Stream function call #%d: %s(%s)",
+                tool_call_count, fn_name, fn_args,
+            )
+
+            from nova.tools.registry import execute_tool
+
+            try:
+                result = await _asyncio.wait_for(
+                    execute_tool(fn_name, fn_args), timeout=15.0,
+                )
+            except TimeoutError:
+                result = f"Tool {fn_name} timed out after 15s"
+            except Exception as e:
+                result = f"Tool {fn_name} error: {e}"
+
+            logger.info("Tool %s result: %s", fn_name, str(result)[:100])
+
+            # Add function call + result to contents for next stream round
+            contents.append(
+                types.Content(
+                    role="model",
+                    parts=[types.Part(function_call=function_call)],
+                )
+            )
+            contents.append(
+                types.Content(
+                    role="user",
+                    parts=[types.Part(function_response=types.FunctionResponse(
+                        name=fn_name,
+                        response={"result": str(result)},
+                    ))],
+                )
+            )
+            # Loop continues — new stream will incorporate tool result
+
+        # Yield any remaining text in the buffer
+        if buffer.strip():
+            yield buffer.strip()
 
     async def is_available(self) -> bool:
         """Check if the Gemini API key is configured and valid."""

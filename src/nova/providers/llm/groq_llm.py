@@ -141,13 +141,17 @@ class GroqLLMProvider(LLMProvider):
             raise ProviderError(self.name, f"Generation failed: {e}") from e
 
     async def generate_stream(
-        self, prompt: str, context: list[dict],
+        self, prompt: str, context: list[dict], tools: list | None = None,
     ) -> AsyncIterator[str]:
         """Stream a response token-by-token via Groq API.
+
+        Note: ``tools`` is accepted for interface conformance but ignored —
+        Groq does not support function calling in streaming mode.
 
         Args:
             prompt: The user's current message.
             context: Prior exchanges.
+            tools: Ignored (Groq streaming does not support tools).
 
         Yields:
             Response text chunks as they arrive.
