@@ -35,30 +35,36 @@ logger = logging.getLogger(__name__)
 
 # Keywords that indicate the query likely needs tool/function calling.
 # When detected, the orchestrator uses the non-streaming tool path.
+# Matching uses prefix/stem comparison so Indonesian suffixed words
+# like "lagunya", "putarkan", "musiknya" still match their roots.
 _TOOL_KEYWORDS = {
     # Time/date
     "jam", "waktu", "time", "tanggal", "date",
     # System control
     "volume", "mute", "unmute", "screenshot", "timer",
     "shutdown", "restart", "lock", "sleep", "hibernate",
+    "matikan", "kunci", "tidurkan", "tangkap",
     # App control
-    "buka", "tutup",
+    "buka", "tutup", "open",
     # System info
-    "baterai", "battery", "ram", "storage", "disk", "uptime",
+    "baterai", "battery", "ram", "storage", "disk", "uptime", "ip",
+    "penyimpanan", "menyala", "address",
     # Notes & reminders
-    "catat", "catatan", "notes", "ingatkan", "reminder",
+    "catat", "catatan", "notes", "note", "ingatkan", "reminder",
+    "hapus",
     # Display & network
-    "brightness", "kecerahan", "wifi",
+    "brightness", "kecerahan", "wifi", "terang", "redup",
     # Web search
-    "cari", "search", "google",
+    "cari", "search", "google", "berita", "cuaca", "news", "weather",
     # Memory
-    "ingat", "remember", "lupakan", "forget",
+    "ingat", "remember", "lupakan", "forget", "profil",
     # Media
     "play", "pause", "next", "previous", "stop",
     # Music
     "putar", "puterin", "lagu", "musik", "music", "song", "skip",
+    "judul", "mainkan", "nyalakan",
     # Dictation
-    "ketik", "dictate",
+    "ketik", "dictate", "tulis",
 }
 
 # Simple greetings — skip memory retrieval for these
@@ -233,12 +239,24 @@ class Orchestrator:
         """Heuristic: does this query likely need tool/function calls?
 
         Checks for keywords associated with NOVA's tools (time, volume,
-        search, etc.). Errs toward False — conversational queries get
-        the faster streaming path; missed tool queries still work via
-        the model's text response (just without tool results).
+        search, etc.) using prefix matching so Indonesian suffixed words
+        like "lagunya", "putarkan", "musiknya" are correctly detected.
+
+        Errs toward False — conversational queries get the faster
+        streaming path; missed tool queries still work via the model's
+        text response (just without tool results).
         """
-        words = set(re.sub(r"[^\w\s]", "", text.lower()).split())
-        return bool(words & _TOOL_KEYWORDS)
+        words = re.sub(r"[^\w\s]", "", text.lower()).split()
+        for word in words:
+            for keyword in _TOOL_KEYWORDS:
+                # Prefix match: "lagunya".startswith("lagu") → True
+                # Also exact: "lagu".startswith("lagu") → True
+                if word.startswith(keyword) and len(keyword) >= 3:
+                    return True
+                # Exact match for short keywords (2 chars like "ip")
+                if len(keyword) < 3 and word == keyword:
+                    return True
+        return False
 
     async def _respond_streaming(
         self, user_input: str,
