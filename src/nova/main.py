@@ -173,32 +173,171 @@ def _run_quota() -> None:
         console.print(f"  [red]Error reading quota: {e}[/]\n")
 
 
+# ── Heartbeat notification helpers ─────────────────────────────────────
+
+
+async def _check_text_notifications(orchestrator) -> None:
+    """Check for urgent heartbeat notifications in text/voice mode.
+
+    Prints notifications to the console instead of playing audio.
+    Passive notifications are handled automatically by the orchestrator
+    (injected into LLM context on next interaction).
+    """
+    queue = orchestrator.notification_queue
+    if not queue.has_urgent():
+        return
+
+    notif = queue.get_next_urgent()
+    if notif is None:
+        return
+
+    # Format the message for console display
+    if notif.message == "__morning_greeting__":
+        msg = "Selamat pagi, Pak."
+    elif notif.message == "__sleep_reminder__":
+        msg = "Pak, sudah malam. Sebaiknya istirahat."
+    else:
+        msg = notif.message
+
+    console.print(f"\n[bold yellow]🔔 [NOVA notification][/] {msg}\n")
+
+
+async def _check_voice_notifications(orchestrator, detector, config) -> bool:
+    """Check and handle urgent notifications with audio in wake word mode.
+
+    Returns True if a notification was handled (caller should re-check queue).
+    """
+    queue = orchestrator.notification_queue
+    if not queue.has_urgent():
+        return False
+
+    from nova.heartbeat.audio import generate_alert, generate_chime, play_notification_sound
+    from nova.heartbeat.queue import Urgency
+
+    notif = queue.get_next_urgent()
+    if notif is None:
+        return False
+
+    logger = logging.getLogger(__name__)
+
+    if notif.urgency == Urgency.GENTLE:
+        # 1. Pause wake word detector
+        detector.stop()
+
+        # 2. Play chime
+        try:
+            chime = generate_chime(volume=config.chime_volume)
+            play_notification_sound(chime)
+        except Exception:
+            logger.warning("Chime playback failed", exc_info=True)
+
+        # 3. Listen for user response (short timeout)
+        try:
+            from nova.audio.capture import AudioCapture
+            capture = AudioCapture()
+            capture.max_recording_seconds = config.gentle_listen_timeout
+            wav_bytes = await capture.capture()
+
+            if len(wav_bytes) > 44:
+                # User responded — process as normal with notification in context
+
+                # Inject notification as passive so it's in the LLM context
+                notif.urgency = Urgency.PASSIVE
+                queue.push(notif)
+
+                # Transcribe and handle
+                transcript = await orchestrator._stt_router.execute(
+                    "transcribe", wav_bytes,
+                )
+                if transcript and transcript.strip():
+                    response = await orchestrator.handle_interaction(
+                        transcript.strip()
+                    )
+                    console.print(f"[bold white]You:[/] {transcript.strip()}")
+                    console.print(f"[bold cyan]Nova:[/] {response}\n")
+            else:
+                # No response — retry or downgrade
+                notif.attempts += 1
+                if notif.attempts < notif.max_attempts:
+                    queue.push(notif)  # re-queue for later
+                else:
+                    notif.urgency = Urgency.PASSIVE
+                    queue.push(notif)  # downgrade to passive
+        except Exception:
+            logger.warning("Gentle notification listen failed", exc_info=True)
+            # Re-queue as passive on failure
+            notif.urgency = Urgency.PASSIVE
+            queue.push(notif)
+
+        # 4. Resume wake word detector
+        import asyncio
+        loop = asyncio.get_event_loop()
+        detector.start(loop)
+        return True
+
+    elif notif.urgency == Urgency.ACTIVE:
+        # 1. Pause wake word detector
+        detector.stop()
+
+        # 2. Play alert sound
+        try:
+            alert = generate_alert(volume=config.alert_volume)
+            play_notification_sound(alert)
+        except Exception:
+            logger.warning("Alert playback failed", exc_info=True)
+
+        # 3. Generate and speak notification via LLM + TTS
+        try:
+            await orchestrator.deliver_notification(notif)
+        except Exception:
+            logger.exception("Active notification delivery failed")
+            # Fallback: print to console
+            console.print(
+                f"\n[bold red]🔔 [NOVA alert][/] {notif.message}\n"
+            )
+
+        # 4. Resume wake word detector
+        import asyncio
+        loop = asyncio.get_event_loop()
+        detector.start(loop)
+        return True
+
+    return False
+
+
 async def _text_mode(orchestrator) -> None:
     """Run the text-only interactive loop."""
+    orchestrator._text_only = True
     console.print("[bold green]NOVA[/] ready (text mode). Type 'exit' to quit.\n")
 
-    while True:
-        try:
-            user_input = await asyncio.get_event_loop().run_in_executor(
-                None, lambda: input("You: "),
-            )
-        except EOFError:
-            break
+    try:
+        while True:
+            # Check for urgent heartbeat notifications (text mode: print to console)
+            await _check_text_notifications(orchestrator)
 
-        user_input = user_input.strip()
-        if not user_input:
-            continue
-        if user_input.lower() in ("exit", "quit", "bye"):
-            break
+            try:
+                user_input = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: input("You: "),
+                )
+            except EOFError:
+                break
 
-        try:
-            response = await orchestrator.handle_interaction(user_input)
-            console.print(f"[bold cyan]Nova:[/] {response}\n")
-        except KeyboardInterrupt:
-            break
-        except Exception:
-            logging.getLogger(__name__).exception("Error during interaction")
-            console.print("[red]Terjadi kesalahan, tapi saya masih berjalan.[/]\n")
+            user_input = user_input.strip()
+            if not user_input:
+                continue
+            if user_input.lower() in ("exit", "quit", "bye"):
+                break
+
+            try:
+                response = await orchestrator.handle_interaction(user_input)
+                console.print(f"[bold cyan]Nova:[/] {response}\n")
+            except KeyboardInterrupt:
+                break
+            except Exception:
+                logging.getLogger(__name__).exception("Error during interaction")
+                console.print("[red]Terjadi kesalahan, tapi saya masih berjalan.[/]\n")
+    finally:
+        orchestrator.stop()
 
 
 async def _voice_mode(orchestrator) -> None:
@@ -211,77 +350,91 @@ async def _voice_mode(orchestrator) -> None:
     loop = asyncio.get_event_loop()
     text_fallback = False  # Set to True if mic fails
 
-    while True:
-        try:
-            if text_fallback:
-                prompt = "Type your message (or 'exit'): "
-            else:
-                prompt = "Press Enter to speak (or type 'exit'): "
+    try:
+        while True:
+            # Check for urgent heartbeat notifications
+            await _check_text_notifications(orchestrator)
 
-            user_input = await loop.run_in_executor(
-                None, lambda: input(prompt),
-            )
-        except EOFError:
-            break
-
-        # Allow typing exit/quit/bye to leave
-        stripped = user_input.strip().lower()
-        if stripped in ("exit", "quit", "bye"):
-            break
-
-        # If they typed actual text, use text mode for it
-        if user_input.strip():
             try:
-                response = await orchestrator.handle_interaction(user_input.strip())
-                console.print(f"[bold cyan]Nova:[/] {response}\n")
-            except KeyboardInterrupt:
+                if text_fallback:
+                    prompt = "Type your message (or 'exit'): "
+                else:
+                    prompt = "Press Enter to speak (or type 'exit'): "
+
+                user_input = await loop.run_in_executor(
+                    None, lambda: input(prompt),
+                )
+            except EOFError:
                 break
+
+            # Allow typing exit/quit/bye to leave
+            stripped = user_input.strip().lower()
+            if stripped in ("exit", "quit", "bye"):
+                break
+
+            # If they typed actual text, use text mode for it
+            if user_input.strip():
+                try:
+                    response = await orchestrator.handle_interaction(user_input.strip())
+                    console.print(f"[bold cyan]Nova:[/] {response}\n")
+                except KeyboardInterrupt:
+                    break
+                except Exception:
+                    logging.getLogger(__name__).exception("Error during interaction")
+                    console.print(
+                        "[red]Terjadi kesalahan, tapi saya masih berjalan.[/]\n"
+                    )
+                continue
+
+            # Text fallback mode — don't try to record
+            if text_fallback:
+                continue
+
+            # Push-to-talk: Enter was pressed with no text
+            console.print("[bold yellow]🎤 Listening...[/]")
+
+            try:
+                response = await orchestrator.handle_voice_interaction()
+
+                # Handle sentinel values from orchestrator
+                if response == "__AUDIO_DEVICE_ERROR__":
+                    console.print(
+                        "[red]Mikrofon tidak ditemukan, beralih ke mode teks.[/]\n"
+                    )
+                    text_fallback = True
+                    continue
+
+                if response == "__STT_FAILED__":
+                    console.print(
+                        "[yellow]Maaf, saya tidak bisa mendengar sekarang. "
+                        "Coba ketik saja.[/]\n"
+                    )
+                    text_fallback = True
+                    continue
+
+                if response is None:
+                    console.print(
+                        "[dim]Saya tidak mendengar apa-apa, bisa diulang?[/]\n"
+                    )
+                    continue
+
+                # Print what was heard and the response
+                transcript = orchestrator.last_transcript
+                if transcript:
+                    console.print(f"[bold white]You:[/] {transcript}")
+                console.print(f"[bold cyan]Nova:[/] {response}\n")
+
+            except KeyboardInterrupt:
+                console.print("\n[dim]Cancelled.[/]\n")
             except Exception:
-                logging.getLogger(__name__).exception("Error during interaction")
-                console.print("[red]Terjadi kesalahan, tapi saya masih berjalan.[/]\n")
-            continue
-
-        # Text fallback mode — don't try to record
-        if text_fallback:
-            continue
-
-        # Push-to-talk: Enter was pressed with no text
-        console.print("[bold yellow]🎤 Listening...[/]")
-
-        try:
-            response = await orchestrator.handle_voice_interaction()
-
-            # Handle sentinel values from orchestrator
-            if response == "__AUDIO_DEVICE_ERROR__":
-                console.print(
-                    "[red]Mikrofon tidak ditemukan, beralih ke mode teks.[/]\n"
+                logging.getLogger(__name__).exception(
+                    "Error during voice interaction"
                 )
-                text_fallback = True
-                continue
-
-            if response == "__STT_FAILED__":
                 console.print(
-                    "[yellow]Maaf, saya tidak bisa mendengar sekarang. "
-                    "Coba ketik saja.[/]\n"
+                    "[red]Terjadi kesalahan, tapi saya masih berjalan.[/]\n"
                 )
-                text_fallback = True
-                continue
-
-            if response is None:
-                console.print("[dim]Saya tidak mendengar apa-apa, bisa diulang?[/]\n")
-                continue
-
-            # Print what was heard and the response
-            transcript = orchestrator.last_transcript
-            if transcript:
-                console.print(f"[bold white]You:[/] {transcript}")
-            console.print(f"[bold cyan]Nova:[/] {response}\n")
-
-        except KeyboardInterrupt:
-            console.print("\n[dim]Cancelled.[/]\n")
-        except Exception:
-            logging.getLogger(__name__).exception("Error during voice interaction")
-            console.print("[red]Terjadi kesalahan, tapi saya masih berjalan.[/]\n")
+    finally:
+        orchestrator.stop()
 
 
 async def _wake_word_mode(orchestrator, force_hotkey: bool = False) -> None:
@@ -307,6 +460,10 @@ async def _wake_word_mode(orchestrator, force_hotkey: bool = False) -> None:
                 f"[bold green]NOVA[/] ready ({mode_label}). "
                 f"Say the wake word to activate, or type 'exit' to quit.\n"
             )
+
+            # Wire ambient RMS for heartbeat presence heuristic
+            if hasattr(detector, "get_ambient_rms"):
+                orchestrator.set_ambient_fn(detector.get_ambient_rms)
         except Exception as e:
             logging.getLogger(__name__).warning(
                 "OpenWakeWord failed to load (%s), falling back to hotkey", e,
@@ -344,7 +501,9 @@ async def _wake_word_mode(orchestrator, force_hotkey: bool = False) -> None:
                 # If they typed actual text, process it
                 if user_input.strip():
                     try:
-                        response = await orchestrator.handle_interaction(user_input.strip())
+                        response = await orchestrator.handle_interaction(
+                            user_input.strip()
+                        )
                         console.print(f"[bold cyan]Nova:[/] {response}\n")
                     except Exception:
                         logging.getLogger(__name__).exception("Error")
@@ -357,6 +516,13 @@ async def _wake_word_mode(orchestrator, force_hotkey: bool = False) -> None:
 
     try:
         while not exit_event.is_set():
+            # --- Check heartbeat notification queue ---
+            handled = await _check_voice_notifications(
+                orchestrator, detector, config,
+            )
+            if handled:
+                continue  # Re-check queue before waiting for wake word
+
             # Wait for either hotkey activation or exit
             activation_task = asyncio.create_task(detector.wait_for_activation())
 
@@ -386,20 +552,23 @@ async def _wake_word_mode(orchestrator, force_hotkey: bool = False) -> None:
 
                     if response == "__AUDIO_DEVICE_ERROR__":
                         console.print(
-                            "[red]Mikrofon tidak ditemukan, beralih ke mode teks.[/]\n"
+                            "[red]Mikrofon tidak ditemukan, "
+                            "beralih ke mode teks.[/]\n"
                         )
                         text_fallback = True
                         break
 
                     if response == "__STT_FAILED__":
                         console.print(
-                            "[yellow]Maaf, saya tidak bisa mendengar sekarang.[/]\n"
+                            "[yellow]Maaf, saya tidak bisa "
+                            "mendengar sekarang.[/]\n"
                         )
                         continue
 
                     if response is None:
                         console.print(
-                            "[dim]Saya tidak mendengar apa-apa, bisa diulang?[/]\n"
+                            "[dim]Saya tidak mendengar apa-apa, "
+                            "bisa diulang?[/]\n"
                         )
                         continue
 
@@ -409,13 +578,16 @@ async def _wake_word_mode(orchestrator, force_hotkey: bool = False) -> None:
                     console.print(f"[bold cyan]Nova:[/] {response}\n")
 
                 except Exception:
-                    logging.getLogger(__name__).exception("Voice interaction error")
+                    logging.getLogger(__name__).exception(
+                        "Voice interaction error"
+                    )
                     console.print("[red]Terjadi kesalahan.[/]\n")
 
     except KeyboardInterrupt:
         pass
     finally:
         detector.stop()
+        orchestrator.stop()
         exit_task.cancel()
         try:
             await exit_task

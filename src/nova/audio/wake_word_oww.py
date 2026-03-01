@@ -213,6 +213,19 @@ class OpenWakeWordDetector:
         self._model = None
         logger.info("OpenWakeWord detector stopped")
 
+    def get_ambient_rms(self) -> float:
+        """Return the current ambient RMS level from the clap detector.
+
+        Used by the heartbeat scheduler as a presence heuristic:
+        low RMS = likely away/sleeping, high RMS = user present.
+
+        Returns:
+            Current ambient RMS, or 0.0 if clap detection is disabled.
+        """
+        if self._clap_detector is not None:
+            return self._clap_detector._ambient_rms
+        return 0.0
+
     @property
     def model_name(self) -> str:
         """Return the loaded model path for display."""

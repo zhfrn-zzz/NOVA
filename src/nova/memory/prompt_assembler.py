@@ -94,6 +94,9 @@ class PromptAssembler:
         # Pending memory context (set by orchestrator, consumed by build())
         self._pending_memory_context: str = ""
 
+        # Pending notification context (set by orchestrator, consumed by build())
+        self._pending_notification_context: str = ""
+
         # Ensure directory and defaults exist
         self._ensure_defaults()
 
@@ -179,6 +182,14 @@ class PromptAssembler:
         if memory_context:
             sections.append(f"Relevant memories:\n{memory_context}")
 
+        # 6. Notification context — pending heartbeat notifications
+        notif_ctx = self._pending_notification_context
+        self._pending_notification_context = ""  # Consume once
+        if notif_ctx:
+            sections.append(
+                f"Pending notifications to deliver (incorporate naturally):\n{notif_ctx}"
+            )
+
         return "\n\n".join(sections)
 
     @staticmethod
@@ -224,6 +235,16 @@ class PromptAssembler:
             context: Formatted memory context string.
         """
         self._pending_memory_context = context
+
+    def set_notification_context(self, context: str) -> None:
+        """Set notification context to be included in the next build() call.
+
+        The context is consumed (cleared) after the next build() call.
+
+        Args:
+            context: Formatted notification context string.
+        """
+        self._pending_notification_context = context
 
 
 def get_prompt_assembler() -> PromptAssembler:

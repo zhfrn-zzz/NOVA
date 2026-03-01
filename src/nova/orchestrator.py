@@ -12,9 +12,12 @@ import os
 import re
 import shutil
 import time
+from collections.abc import Callable
 
 from nova.audio.streaming_tts import StreamingTTSPlayer
 from nova.config import get_config
+from nova.heartbeat.queue import Notification, NotificationQueue
+from nova.heartbeat.scheduler import HeartbeatScheduler
 from nova.memory.conversation import ConversationManager
 from nova.memory.embeddings import get_embedder
 from nova.memory.memory_store import get_memory_store
@@ -119,12 +122,25 @@ class Orchestrator:
         if self._embedding_fn:
             asyncio.ensure_future(self._backfill_startup())
 
+        # --- Heartbeat scheduler ---
+        self._notification_queue = NotificationQueue()
+        self._heartbeat_scheduler = HeartbeatScheduler(
+            memory_store=self._memory_store,
+            notification_queue=self._notification_queue,
+        )
+        if config.heartbeat_enabled:
+            self._heartbeat_scheduler.start()
+
+        # Text-only flag (set by main.py when in text mode)
+        self._text_only = False
+
         logger.info(
-            "Orchestrator initialized — LLM: %s | TTS: %s | STT: %s | Embedder: %s",
+            "Orchestrator initialized — LLM: %s | TTS: %s | STT: %s | Embedder: %s | Heartbeat: %s",
             [p.name for p in llm_providers],
             [p.name for p in tts_providers],
             [p.name for p in stt_providers],
             "enabled" if embedder else "disabled",
+            "enabled" if config.heartbeat_enabled else "disabled",
         )
 
     async def _summarize_for_compaction(self, prompt: str) -> str:
@@ -200,6 +216,39 @@ class Orchestrator:
         except Exception:
             logger.debug("TTS warmup failed (non-critical)")
 
+    def _inject_passive_notifications(self) -> None:
+        """Check for passive notifications and inject into prompt context."""
+        passive = self._notification_queue.get_passive()
+        if passive:
+            note_text = self._format_notifications(passive)
+            get_prompt_assembler().set_notification_context(note_text)
+            logger.info(
+                "Injected %d passive notification(s) into LLM context",
+                len(passive),
+            )
+
+    @staticmethod
+    def _format_notifications(notifications: list[Notification]) -> str:
+        """Format notifications for LLM context injection.
+
+        Args:
+            notifications: List of Notification objects.
+
+        Returns:
+            Formatted string for the LLM to incorporate naturally.
+        """
+        lines: list[str] = []
+        for n in notifications:
+            if n.message == "__morning_greeting__":
+                lines.append("Deliver a brief morning greeting to the user.")
+            elif n.message == "__sleep_reminder__":
+                lines.append(
+                    "Gently remind the user it's late and they should rest."
+                )
+            else:
+                lines.append(f"Remind the user: {n.message}")
+        return "\n".join(lines)
+
     async def _respond(
         self, user_input: str,
     ) -> tuple[str, float] | None:
@@ -217,6 +266,9 @@ class Orchestrator:
         memory_context = await self._get_memory_context(user_input)
         if memory_context:
             get_prompt_assembler().set_memory_context(memory_context)
+
+        # Inject passive notifications (heartbeat)
+        self._inject_passive_notifications()
 
         context = self._context.get_context()
         provider = self._llm_router.providers[0]
@@ -280,6 +332,9 @@ class Orchestrator:
         memory_context = await self._get_memory_context(text)
         if memory_context:
             get_prompt_assembler().set_memory_context(memory_context)
+
+        # Inject passive notifications (heartbeat)
+        self._inject_passive_notifications()
 
         start = time.perf_counter()
         response = await self._llm_router.execute(
@@ -458,6 +513,69 @@ class Orchestrator:
     def clear_context(self) -> None:
         """Reset the conversation history."""
         self._context.clear()
+
+    def stop(self) -> None:
+        """Shut down background systems (heartbeat scheduler)."""
+        self._heartbeat_scheduler.stop()
+
+    def set_ambient_fn(self, fn: Callable[[], float]) -> None:
+        """Set the ambient RMS function for the heartbeat scheduler.
+
+        Called by main.py after the wake word detector is initialized,
+        so the scheduler can use ambient noise as a presence heuristic.
+
+        Args:
+            fn: Callable returning current ambient RMS level.
+        """
+        self._heartbeat_scheduler._ambient_fn = fn
+
+    @property
+    def notification_queue(self) -> NotificationQueue:
+        """Return the notification queue for main loop access."""
+        return self._notification_queue
+
+    async def deliver_notification(self, notification: Notification) -> str:
+        """Generate and speak a notification message via LLM + TTS.
+
+        Used for ACTIVE notifications that need to be spoken immediately.
+
+        Args:
+            notification: The notification to deliver.
+
+        Returns:
+            The generated notification text.
+        """
+        if notification.message == "__morning_greeting__":
+            prompt = "Deliver a brief, warm morning greeting."
+        elif notification.message == "__sleep_reminder__":
+            prompt = "Gently remind the user it's late and time to rest."
+        else:
+            prompt = f"Deliver this reminder concisely: {notification.message}"
+
+        # Use LLM to generate natural wording, then TTS
+        try:
+            provider = self._llm_router.providers[0]
+            start = time.perf_counter()
+            sentence_stream = provider.generate_stream(
+                prompt, context=[], tools=None,
+            )
+            full_text, tts_time = await self._streaming_tts.stream_from_llm(
+                sentence_stream, self._tts_router, language="auto",
+            )
+            elapsed = time.perf_counter() - start
+            logger.info(
+                "Notification delivered: %.2fs (TTS: %.2fs) — %r",
+                elapsed, tts_time, (full_text or "")[:80],
+            )
+            return full_text or prompt
+        except Exception:
+            logger.exception("Failed to deliver notification via LLM+TTS")
+            # Fallback: just speak the raw message
+            try:
+                await self.speak(notification.message)
+            except Exception:
+                logger.warning("TTS fallback also failed", exc_info=True)
+            return notification.message
 
     async def check_providers(self) -> dict[str, dict[str, bool | str]]:
         """Check connectivity to all providers, mic, and audio player.
