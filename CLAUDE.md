@@ -103,9 +103,14 @@ nova/
 │       │       ├── google_cloud_tts.py  # Google Cloud TTS (Chirp 3 HD, primary)
 │       │       ├── edge_tts_provider.py
 │       │       └── cloudflare_tts.py
+│       ├── iot/
+│       │   ├── __init__.py
+│       │   ├── tuya_cloud.py     # Tuya Cloud IR driver (AC, TV remote)
+│       │   └── lg_webos.py       # LG WebOS TV control via LAN (aiowebostv)
 │       ├── tools/
 │       │   ├── __init__.py
 │       │   ├── registry.py       # Central tool registry for Gemini function calling
+│       │   ├── iot.py            # Smart home control_device tool (AC, TV)
 │       │   ├── system_control.py # Volume, media, apps, screenshot, timer, power
 │       │   ├── system_info.py    # Battery, RAM, storage, IP, uptime (psutil)
 │       │   ├── notes.py          # Quick notes: add, read, clear (~/.nova/notes.txt)
@@ -150,7 +155,8 @@ nova/
 │   ├── test_heartbeat_audio.py       # Phase 4: Audio generation
 │   ├── test_sound_loader.py         # Phase 4: Custom sound loader
 │   ├── test_weather.py             # Phase 2: Weather tool
-│   └── test_tts_cache.py           # Phase 5: TTS audio cache
+│   ├── test_tts_cache.py           # Phase 5: TTS audio cache
+│   └── test_iot.py                 # Phase 6: IoT device control
 └── scripts/
     ├── setup.sh                  # Full dependency install script
     └── nova.service              # systemd auto-start
@@ -209,6 +215,7 @@ nova/
 - [x] Task 47: Weather tool — Open-Meteo API (free, no key), get_weather with geocoding, WMO codes in Indonesian, default Bekasi (Phase 2)
 - [x] Task 48: Dead code cleanup — removed legacy context.py, dead UserMemory class from persistent.py, broken TestUserMemory/TestRemindersTools tests, fixed test_all_tools.py imports, deleted test output artifacts (Phase 5)
 - [x] Task 49: TTFA optimization — sub-sentence clause flushing for first sentence, Google Cloud TTS client pre-init at startup, in-memory TTS audio cache (LRU), parallel TTS prefetch in streaming consumer (Phase 5)
+- [x] Task 50: IoT integration Phase 1 — AC control via Tuya Cloud IR, TV Atas (IR+WebOS), TV Bawah (WebOS only), control_device tool, smart dispatch (Phase 6)
 
 ## Important Notes
 

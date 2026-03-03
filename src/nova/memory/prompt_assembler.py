@@ -65,6 +65,20 @@ Weather:
 - Default location is Bekasi. Only specify location if user asks about another city.
 - Summarize the weather data naturally, don't read raw numbers.
 - Example: "Besok diprediksi hujan dengan kemungkinan 80%, suhu 24-32 derajat."
+
+IoT / Smart Home:
+- For AC/TV control, use control_device tool.
+- AC actions: on, off, set_temp (16-30), set_mode, set_fan.
+  Modes: 0=dingin, 1=panas, 2=auto, 3=kipas, 4=kering.
+  Fan: 0=auto, 1=pelan, 2=sedang, 3=kencang.
+- TWO TVs: "tv_atas" (kamar atas), "tv_bawah" (ruang tamu).
+  If user just says "TV", ask which one.
+- TV Atas: full control (power, volume, channel, apps).
+  TV Bawah: WebOS only — no power on, no channel, no nav.
+- TV actions: on, off, open_app, set_volume (0-100),
+  volume_up, volume_down, channel_up, channel_down.
+- "AC 24 derajat" → device=ac, action=set_temp, value=24.
+- Respond naturally. "AC sudah dinyalakan di suhu 24 derajat."
 """
 
 _DEFAULT_USER = """\

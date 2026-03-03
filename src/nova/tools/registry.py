@@ -20,6 +20,7 @@ from nova.tools import (
     dictation,
     display_control,
     heartbeat_reminders,
+    iot,
     music_player,
     network_control,
     notes,
@@ -768,6 +769,48 @@ _FUNCTION_DECLARATIONS = [
             },
         },
     ),
+    # ── IoT / Smart Home ──────────────────────────────────────────────
+    types.FunctionDeclaration(
+        name="control_device",
+        description=(
+            "Kontrol perangkat smart home. Gunakan saat user ingin mengatur "
+            "AC (nyala/mati/suhu/mode/kipas), TV (nyala/mati/volume/channel/"
+            "buka app), atau perangkat IoT lainnya. "
+            "Contoh: 'nyalakan AC', 'set suhu 24', 'matikan TV', "
+            "'buka YouTube di TV atas', 'volume TV naik'."
+        ),
+        parameters_json_schema={
+            "type": "object",
+            "properties": {
+                "device": {
+                    "type": "string",
+                    "description": (
+                        "Nama perangkat: 'ac', 'tv_atas' (kamar atas), "
+                        "atau 'tv_bawah' (ruang tamu)."
+                    ),
+                },
+                "action": {
+                    "type": "string",
+                    "description": (
+                        "Aksi: 'on', 'off', 'set_temp', 'set_mode', 'set_fan', "
+                        "'volume_up', 'volume_down', 'set_volume', "
+                        "'channel_up', 'channel_down', 'open_app', "
+                        "'home', 'back', 'menu', 'up', 'down', 'left', 'right', 'ok'."
+                    ),
+                },
+                "value": {
+                    "type": "string",
+                    "description": (
+                        "Nilai opsional: angka suhu (16-30), level volume (0-100), "
+                        "nama app ('youtube', 'netflix', 'disney', 'spotify'), "
+                        "mode AC (0=dingin, 1=panas, 2=auto, 3=kipas, 4=kering), "
+                        "atau kecepatan kipas (0=auto, 1=pelan, 2=sedang, 3=kencang)."
+                    ),
+                },
+            },
+            "required": ["device", "action"],
+        },
+    ),
 ]
 
 # Map function names → async callables
@@ -840,6 +883,8 @@ _TOOL_IMPLEMENTATIONS: dict[str, object] = {
     "stop_music": music_player.stop_music,
     # Weather
     "get_weather": weather.get_weather,
+    # IoT / Smart Home
+    "control_device": iot.control_device,
 }
 
 

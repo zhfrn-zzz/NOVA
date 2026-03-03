@@ -29,6 +29,8 @@ dependencies = [
     "pyautogui>=0.9",
     "screen-brightness-control>=0.22",
     "google-cloud-texttospeech>=2.16",
+    "tinytuya>=1.15",
+    "aiowebostv>=0.4",
 ]
 
 [project.optional-dependencies]
