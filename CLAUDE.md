@@ -123,7 +123,6 @@ nova/
 │       │   └── audio.py          # generate_chime(), generate_alert()
 │       ├── memory/
 │       │   ├── __init__.py
-│       │   ├── context.py            # Legacy sliding window (backward compat)
 │       │   ├── conversation.py       # Phase 3: ConversationManager with auto-compaction
 │       │   ├── embeddings.py         # Phase 3: Gemini embedding with circuit breaker
 │       │   ├── memory_store.py       # Phase 3: SQLite-backed memory with FTS5
@@ -206,6 +205,7 @@ nova/
 - [x] Task 45: Dynamic urgency — scheduler auto-calculates urgency from time proximity: <=5min ACTIVE, <=30min GENTLE, >30min PASSIVE (Phase 4)
 - [x] Task 46: Custom sounds — ~/.nova/sounds/ for beep/chime/alert overrides, soundfile loading with stereo-to-mono + resampling, cached, config toggle (Phase 4)
 - [x] Task 47: Weather tool — Open-Meteo API (free, no key), get_weather with geocoding, WMO codes in Indonesian, default Bekasi (Phase 2)
+- [x] Task 48: Dead code cleanup — removed legacy context.py, dead UserMemory class from persistent.py, broken TestUserMemory/TestRemindersTools tests, fixed test_all_tools.py imports, deleted test output artifacts (Phase 5)
 
 ## Important Notes
 

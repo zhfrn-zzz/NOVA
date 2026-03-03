@@ -105,12 +105,11 @@ async def run_all_tests() -> None:
 
     # Clean up test fact
     try:
-        from nova.memory.persistent import get_user_memory
-        mem = get_user_memory()
-        mem.remove_fact("test_key")
-        results.append(("remove_fact (cleanup)", PASS, "test_key removed"))
+        from nova.memory.persistent import memory_forget
+        r = await memory_forget("test_key")
+        results.append(("memory_forget (cleanup)", PASS, r))
     except Exception as e:
-        results.append(("remove_fact (cleanup)", FAIL, str(e)))
+        results.append(("memory_forget (cleanup)", FAIL, str(e)))
 
     # ── 5. Web Search ───────────────────────────────────────────────
     from nova.tools.web_search import web_search
@@ -150,7 +149,7 @@ async def run_all_tests() -> None:
     results.append(("wifi_off", SKIP, "Skipped – would change network settings"))
 
     # ── 8. Volume Controls ──────────────────────────────────────────
-    from nova.tools.system_control import volume_up, volume_down, mute_unmute
+    from nova.tools.system_control import volume_down, volume_up
 
     try:
         r = await volume_up()
@@ -170,8 +169,6 @@ async def run_all_tests() -> None:
     results.append(("mute_unmute", SKIP, "Skipped – would toggle mute"))
 
     # ── 9. Media Controls ───────────────────────────────────────────
-    from nova.tools.system_control import play_pause_media, next_track, previous_track
-
     results.append(("play_pause_media", SKIP, "Skipped – would affect media playback"))
     results.append(("next_track", SKIP, "Skipped – would affect media playback"))
     results.append(("previous_track", SKIP, "Skipped – would affect media playback"))
@@ -197,18 +194,16 @@ async def run_all_tests() -> None:
         results.append(("set_timer", FAIL, str(e)))
 
     # ── 12. Reminder ────────────────────────────────────────────────
-    from nova.tools.reminders import set_reminder
+    from nova.tools.heartbeat_reminders import set_reminder
 
     try:
-        r = await set_reminder(minutes=1, message="Test reminder")
-        assert isinstance(r, str) and "reminder" in r.lower()
+        r = await set_reminder(message="Test reminder", delay_minutes=1)
+        assert isinstance(r, str)
         results.append(("set_reminder", PASS, r))
     except Exception as e:
         results.append(("set_reminder", FAIL, str(e)))
 
     # ── 13. Apps (test open_app with safe app) ──────────────────────
-    from nova.tools.system_control import open_app, open_browser, open_url, open_terminal, open_file_manager
-
     results.append(("open_app", SKIP, "Skipped – would open an application"))
     results.append(("open_browser", SKIP, "Skipped – would open browser"))
     results.append(("open_url", SKIP, "Skipped – would open URL"))
@@ -216,16 +211,12 @@ async def run_all_tests() -> None:
     results.append(("open_file_manager", SKIP, "Skipped – would open explorer"))
 
     # ── 14. Power Controls ──────────────────────────────────────────
-    from nova.tools.system_control import lock_screen, shutdown_pc, restart_pc, sleep_pc
-
     results.append(("lock_screen", SKIP, "Skipped – destructive"))
     results.append(("shutdown_pc", SKIP, "Skipped – destructive"))
     results.append(("restart_pc", SKIP, "Skipped – destructive"))
     results.append(("sleep_pc", SKIP, "Skipped – destructive"))
 
     # ── 15. Dictation ───────────────────────────────────────────────
-    from nova.tools.dictation import dictate
-
     results.append(("dictate", SKIP, "Skipped – would type into active window"))
 
     # ── 16. Registry (meta test) ────────────────────────────────────

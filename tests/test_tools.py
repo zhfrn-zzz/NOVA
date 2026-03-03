@@ -1,6 +1,5 @@
-"""Tests for NOVA tools: time_date, system_control, memory, and registry."""
+"""Tests for NOVA tools: time_date, system_control, and registry."""
 
-import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -132,116 +131,6 @@ class TestWebSearchTool:
         pytest.fail("web_search declaration not found")
 
 
-class TestUserMemory:
-    """Tests for persistent user memory (UserMemory class)."""
-
-    @pytest.fixture(autouse=True)
-    def _use_tmp_memory(self, tmp_path):
-        """Redirect memory file to a temp dir for test isolation."""
-        mem_file = tmp_path / "memory.json"
-        with (
-            patch("nova.memory.persistent._MEMORY_FILE", mem_file),
-            patch("nova.memory.persistent._MEMORY_DIR", tmp_path),
-            patch("nova.memory.persistent._instance", None),
-        ):
-            yield mem_file
-
-    def test_add_and_get_facts(self):
-        from nova.memory.persistent import UserMemory
-
-        mem = UserMemory()
-        mem.add_fact("name", "Zhafran")
-        mem.add_fact("location", "Bekasi")
-        facts = mem.get_facts()
-        assert facts == {"name": "Zhafran", "location": "Bekasi"}
-
-    def test_get_fact_single(self):
-        from nova.memory.persistent import UserMemory
-
-        mem = UserMemory()
-        mem.add_fact("hobby", "guitar")
-        assert mem.get_fact("hobby") == "guitar"
-        assert mem.get_fact("nonexistent") is None
-
-    def test_remove_fact(self):
-        from nova.memory.persistent import UserMemory
-
-        mem = UserMemory()
-        mem.add_fact("color", "blue")
-        assert mem.remove_fact("color") is True
-        assert mem.remove_fact("color") is False
-        assert mem.get_facts() == {}
-
-    def test_clear(self):
-        from nova.memory.persistent import UserMemory
-
-        mem = UserMemory()
-        mem.add_fact("a", "1")
-        mem.add_fact("b", "2")
-        mem.clear()
-        assert mem.get_facts() == {}
-        assert mem.fact_count == 0
-
-    def test_persistence_across_instances(self, _use_tmp_memory):
-        from nova.memory.persistent import UserMemory
-
-        mem1 = UserMemory()
-        mem1.add_fact("name", "Zhafran")
-
-        # New instance reads from same file
-        mem2 = UserMemory()
-        assert mem2.get_fact("name") == "Zhafran"
-
-    def test_key_normalized_to_lowercase(self):
-        from nova.memory.persistent import UserMemory
-
-        mem = UserMemory()
-        mem.add_fact("Name", "Zhafran")
-        assert mem.get_fact("name") == "Zhafran"
-
-    def test_file_written_as_json(self, _use_tmp_memory):
-        from nova.memory.persistent import UserMemory
-
-        mem = UserMemory()
-        mem.add_fact("city", "Jakarta")
-        data = json.loads(_use_tmp_memory.read_text(encoding="utf-8"))
-        assert data == {"city": "Jakarta"}
-
-    @pytest.mark.asyncio
-    async def test_remember_fact_tool(self):
-        from nova.memory.persistent import get_user_memory, remember_fact
-
-        result = await remember_fact("name", "Zhafran")
-        assert "Zhafran" in result
-        assert get_user_memory().get_fact("name") == "Zhafran"
-
-    @pytest.mark.asyncio
-    async def test_recall_facts_tool(self):
-        from nova.memory.persistent import get_user_memory, recall_facts
-
-        get_user_memory().add_fact("name", "Zhafran")
-        result = await recall_facts()
-        assert "name=Zhafran" in result
-
-    @pytest.mark.asyncio
-    async def test_recall_facts_empty(self):
-        from nova.memory.persistent import recall_facts
-
-        result = await recall_facts()
-        assert "Belum ada" in result
-
-    def test_memory_tools_in_registry(self):
-        names = get_all_tool_names()
-        assert "remember_fact" in names
-        assert "recall_facts" in names
-
-    @pytest.mark.asyncio
-    async def test_remember_fact_via_registry(self):
-        result = await execute_tool("remember_fact", {"key": "test", "value": "123"})
-        assert isinstance(result, str)
-        assert "123" in result
-
-
 class TestSystemInfoTools:
     """Tests for system info tools (psutil-based)."""
 
@@ -362,37 +251,6 @@ class TestNotesTools:
         assert "add_note" in names
         assert "get_notes" in names
         assert "clear_notes" in names
-
-
-class TestRemindersTools:
-    """Tests for reminders tool."""
-
-    @pytest.mark.asyncio
-    async def test_set_reminder_returns_confirmation(self):
-        from nova.tools.reminders import set_reminder
-
-        result = await set_reminder(5, "Istirahat")
-        assert "5 menit" in result
-        assert "Istirahat" in result
-
-    @pytest.mark.asyncio
-    async def test_set_reminder_invalid_time(self):
-        from nova.tools.reminders import set_reminder
-
-        result = await set_reminder(0, "Test")
-        assert "lebih dari 0" in result
-
-    @pytest.mark.asyncio
-    async def test_reminder_via_registry(self):
-        result = await execute_tool(
-            "set_reminder", {"minutes": 10, "message": "Meeting"}
-        )
-        assert isinstance(result, str)
-        assert "10 menit" in result
-
-    def test_reminder_in_registry(self):
-        names = get_all_tool_names()
-        assert "set_reminder" in names
 
 
 class TestDictationTool:

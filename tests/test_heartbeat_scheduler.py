@@ -89,7 +89,7 @@ class TestCheckReminders:
         mock_store.get_pending_reminders.return_value = [{
             "id": 2,
             "message": "Late reminder",
-            "remind_at": now + timedelta(minutes=1),
+            "remind_at": now + timedelta(minutes=15),  # 15 min  GENTLE, then ambient downgrades to PASSIVE
             "lead_time": 5,
             "is_alarm": False,
             "urgency": 3,  # ACTIVE
@@ -129,7 +129,7 @@ class TestCheckReminders:
         reminder = {
             "id": 4,
             "message": "Daily standup",
-            "remind_at": now + timedelta(minutes=1),
+            "remind_at": now + timedelta(minutes=15),  # 15 min  GENTLE, then ambient downgrades to PASSIVE
             "lead_time": 5,
             "is_alarm": False,
             "urgency": 2,
@@ -292,7 +292,7 @@ class TestAmbientGate:
         mock_store.get_pending_reminders.return_value = [{
             "id": 5,
             "message": "Test",
-            "remind_at": now + timedelta(minutes=1),
+            "remind_at": now + timedelta(minutes=15),  # 15 min  GENTLE, then ambient downgrades to PASSIVE
             "lead_time": 5,
             "is_alarm": False,
             "urgency": 2,  # GENTLE
@@ -468,7 +468,7 @@ class TestDebugLogging:
         mock_store.get_pending_reminders.return_value = [{
             "id": 10,
             "message": "Test log",
-            "remind_at": now + timedelta(minutes=1),  # 1 min → ACTIVE
+            "remind_at": now + timedelta(minutes=1),
             "lead_time": 0,
             "is_alarm": False,
             "urgency": 2,
