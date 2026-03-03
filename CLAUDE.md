@@ -79,7 +79,8 @@ nova/
 │       │   ├── clap_detector.py  # Double-clap wake trigger (alternative)
 │       │   ├── playback.py       # Speaker output (mpv)
 │       │   ├── sound_loader.py   # Custom sound loader (~/.nova/sounds/ + fallback)
-│       │   ├── streaming_tts.py  # Split-and-stream TTS for low latency
+│       │   ├── streaming_tts.py  # Split-and-stream TTS for low latency (with prefetch)
+│       │   ├── tts_cache.py     # In-memory LRU cache for TTS audio bytes
 │       │   ├── wake_word.py      # Hotkey fallback detector (Ctrl+Space)
 │       │   └── wake_word_oww.py  # OpenWakeWord detector (default)
 │       ├── providers/
@@ -148,7 +149,8 @@ nova/
 │   ├── test_heartbeat_scheduler.py   # Phase 4: Heartbeat scheduler
 │   ├── test_heartbeat_audio.py       # Phase 4: Audio generation
 │   ├── test_sound_loader.py         # Phase 4: Custom sound loader
-│   └── test_weather.py             # Phase 2: Weather tool
+│   ├── test_weather.py             # Phase 2: Weather tool
+│   └── test_tts_cache.py           # Phase 5: TTS audio cache
 └── scripts/
     ├── setup.sh                  # Full dependency install script
     └── nova.service              # systemd auto-start
@@ -206,6 +208,7 @@ nova/
 - [x] Task 46: Custom sounds — ~/.nova/sounds/ for beep/chime/alert overrides, soundfile loading with stereo-to-mono + resampling, cached, config toggle (Phase 4)
 - [x] Task 47: Weather tool — Open-Meteo API (free, no key), get_weather with geocoding, WMO codes in Indonesian, default Bekasi (Phase 2)
 - [x] Task 48: Dead code cleanup — removed legacy context.py, dead UserMemory class from persistent.py, broken TestUserMemory/TestRemindersTools tests, fixed test_all_tools.py imports, deleted test output artifacts (Phase 5)
+- [x] Task 49: TTFA optimization — sub-sentence clause flushing for first sentence, Google Cloud TTS client pre-init at startup, in-memory TTS audio cache (LRU), parallel TTS prefetch in streaming consumer (Phase 5)
 
 ## Important Notes
 

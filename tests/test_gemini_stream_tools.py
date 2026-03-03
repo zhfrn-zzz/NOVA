@@ -136,6 +136,61 @@ class TestExtractSentence:
         assert remaining == "Dr. Budi is here"
 
 
+class TestClauseFlush:
+    """Tests for sub-sentence clause-level flushing (first sentence TTFA optimization)."""
+
+    def test_clause_flush_at_comma_when_long_enough(self):
+        """Clause flush should trigger at comma when buffer >= 25 chars."""
+        text = "Tuan, besok di Bekasi diprediksi hujan, suhu sekitar 24 derajat"
+        sentence, remaining = _extract_sentence(text, allow_clause_flush=True)
+        assert sentence is not None
+        assert "," in sentence
+        assert len(sentence) >= 25
+
+    def test_clause_flush_not_triggered_when_short(self):
+        """Clause flush should NOT trigger when buffer < 25 chars."""
+        text = "Tuan, ini pendek, ya"
+        sentence, remaining = _extract_sentence(text, allow_clause_flush=True)
+        assert sentence is None
+        assert remaining == text
+
+    def test_clause_flush_disabled_by_default(self):
+        """Without allow_clause_flush, commas should not trigger flush."""
+        text = "Tuan, besok di Bekasi diprediksi hujan, suhu sekitar 24 derajat"
+        sentence, remaining = _extract_sentence(text, allow_clause_flush=False)
+        assert sentence is None
+
+    def test_clause_flush_at_semicolon(self):
+        """Clause flush should trigger at semicolon."""
+        text = "Suhu hari ini cukup panas; perkiraan hujan sore"
+        sentence, remaining = _extract_sentence(text, allow_clause_flush=True)
+        assert sentence is not None
+        assert ";" in sentence
+        assert len(sentence) >= 25
+
+    def test_clause_flush_at_colon(self):
+        """Clause flush should trigger at colon."""
+        text = "Berikut informasinya Tuan: suhu sekitar 30 derajat"
+        sentence, remaining = _extract_sentence(text, allow_clause_flush=True)
+        assert sentence is not None
+        assert ":" in sentence
+        assert len(sentence) >= 25
+
+    def test_sentence_boundary_still_preferred(self):
+        """Sentence-level boundary (period) should still work with clause flush enabled."""
+        text = "Hello world this is a test. How are you"
+        sentence, remaining = _extract_sentence(text, allow_clause_flush=True)
+        assert sentence == "Hello world this is a test."
+        assert remaining == "How are you"
+
+    def test_clause_flush_requires_whitespace_after(self):
+        """Clause flush needs punctuation + whitespace (not just punctuation)."""
+        # Comma without trailing space — no flush
+        text = "Tuan besok di Bekasi diprediksi hujan,suhu sekitar"
+        sentence, remaining = _extract_sentence(text, allow_clause_flush=True)
+        assert sentence is None
+
+
 class TestGenerateStreamPureText:
     """Test generate_stream() with text-only responses (no tool calls)."""
 

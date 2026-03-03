@@ -30,7 +30,7 @@ def _build_system_prompt() -> str:
     return get_prompt_assembler().build()
 
 # Models in order of preference
-_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash-lite"]
+_MODELS = ["gemini-2.5-flash", "gemini-3-flash-preview"]
 
 # Maximum number of function-call round-trips to prevent infinite loops
 _MAX_TOOL_CALLS = 3
@@ -46,12 +46,25 @@ _STREAM_ABBREVIATIONS = {
 # Pattern: sentence-ending punctuation followed by whitespace
 _SENTENCE_BREAK_RE = re.compile(r"[.!?]\s")
 
+# Pattern: clause-level punctuation followed by whitespace
+# Used for sub-sentence flushing on the first sentence to reduce TTFA
+_CLAUSE_BREAK_RE = re.compile(r"[,;:\u2014]\s")
 
-def _extract_sentence(buffer: str) -> tuple[str | None, str]:
+
+def _extract_sentence(
+    buffer: str, *, allow_clause_flush: bool = False,
+) -> tuple[str | None, str]:
     """Extract the first complete sentence from a token buffer.
 
-    Returns (sentence, remaining_buffer) if a sentence boundary is found,
-    or (None, buffer) if no complete sentence yet.
+    Args:
+        buffer: Accumulated token text.
+        allow_clause_flush: If True, also flush at clause boundaries
+            (comma, semicolon, colon, em-dash) when buffer >= 25 chars.
+            Used only for the first sentence to reduce TTFA.
+
+    Returns:
+        (sentence, remaining_buffer) if a boundary is found,
+        or (None, buffer) if no complete sentence yet.
     """
     # Check for newline boundary
     nl_idx = buffer.find("\n")
@@ -61,7 +74,7 @@ def _extract_sentence(buffer: str) -> tuple[str | None, str]:
         if sentence and len(sentence) >= 8:
             return sentence, remaining
 
-    # Check for punctuation + whitespace boundaries
+    # Check for punctuation + whitespace boundaries (sentence-level)
     for match in _SENTENCE_BREAK_RE.finditer(buffer):
         end = match.start() + 1  # Include the punctuation character
         candidate = buffer[:end].strip()
@@ -81,6 +94,21 @@ def _extract_sentence(buffer: str) -> tuple[str | None, str]:
                 continue
 
         return candidate, remaining
+
+    # Clause-level flush: comma, semicolon, colon, or em-dash followed
+    # by whitespace — only when explicitly enabled (first sentence) and
+    # the buffer has accumulated enough text for natural-sounding TTS.
+    if allow_clause_flush and len(buffer) >= 25:
+        for m in _CLAUSE_BREAK_RE.finditer(buffer):
+            end = m.start() + 1  # include the punctuation
+            candidate = buffer[:end].strip()
+            remaining = buffer[m.end():]
+            if len(candidate) >= 25:
+                logger.debug(
+                    "Clause flush (%d chars): %r",
+                    len(candidate), candidate[:60],
+                )
+                return candidate, remaining
 
     return None, buffer
 
@@ -316,9 +344,11 @@ class GeminiProvider(LLMProvider):
         config = self._get_config(tools=tools)
         buffer = ""
         tool_call_count = 0
+        first_sentence_yielded = False
 
         while tool_call_count <= _MAX_TOOL_CALLS:
             function_call = None
+            function_call_content = None  # preserve raw content w/ thought_signature
 
             try:
                 stream = await client.aio.models.generate_content_stream(
@@ -332,21 +362,34 @@ class GeminiProvider(LLMProvider):
                         for part in chunk.candidates[0].content.parts:
                             if part.function_call:
                                 function_call = part.function_call
+                                # Capture the ENTIRE content object from the
+                                # model so thought_signature is preserved.
+                                function_call_content = (
+                                    chunk.candidates[0].content
+                                )
                                 break
                             if part.text:
                                 buffer += part.text
                                 # Extract and yield complete sentences
                                 while True:
-                                    sentence, buffer = _extract_sentence(buffer)
+                                    sentence, buffer = _extract_sentence(
+                                        buffer,
+                                        allow_clause_flush=not first_sentence_yielded,
+                                    )
                                     if sentence is None:
                                         break
+                                    first_sentence_yielded = True
                                     yield sentence
                     elif chunk.text:
                         buffer += chunk.text
                         while True:
-                            sentence, buffer = _extract_sentence(buffer)
+                            sentence, buffer = _extract_sentence(
+                                buffer,
+                                allow_clause_flush=not first_sentence_yielded,
+                            )
                             if sentence is None:
                                 break
+                            first_sentence_yielded = True
                             yield sentence
 
                     if function_call:
@@ -383,20 +426,17 @@ class GeminiProvider(LLMProvider):
 
             logger.info("Tool %s result: %s", fn_name, str(result)[:100])
 
-            # Add function call + result to contents for next stream round
+            # Add model's raw function-call content (preserves
+            # thought_signature required by Gemini 3 Flash) and tool
+            # result to contents for the next stream round.
+            contents.append(function_call_content)
             contents.append(
                 types.Content(
-                    role="model",
-                    parts=[types.Part(function_call=function_call)],
-                )
-            )
-            contents.append(
-                types.Content(
-                    role="user",
-                    parts=[types.Part(function_response=types.FunctionResponse(
+                    role="tool",
+                    parts=[types.Part.from_function_response(
                         name=fn_name,
                         response={"result": str(result)},
-                    ))],
+                    )],
                 )
             )
             # Loop continues — new stream will incorporate tool result

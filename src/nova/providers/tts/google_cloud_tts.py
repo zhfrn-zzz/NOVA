@@ -9,6 +9,7 @@ import asyncio
 import logging
 import os
 
+from nova.audio.tts_cache import get_tts_cache
 from nova.config import get_config
 from nova.providers.base import ProviderError, TTSProvider
 from nova.providers.tts.edge_tts_provider import detect_language
@@ -55,6 +56,20 @@ class GoogleCloudTTSProvider(TTSProvider):
             self._client = texttospeech_v1.TextToSpeechClient(credentials=credentials)
             logger.info("Google Cloud TTS client initialized")
         return self._client
+
+    async def warm_up(self) -> None:
+        """Eagerly initialize the gRPC client so first synthesis is fast.
+
+        Called at startup by the orchestrator. Runs the blocking client
+        construction in a thread to avoid stalling the event loop.
+        """
+        if self._client is not None:
+            return
+        try:
+            await asyncio.to_thread(self._get_client)
+            logger.info("Google Cloud TTS client warmed up at startup")
+        except Exception:
+            logger.debug("Google Cloud TTS warm_up failed (non-critical)")
 
     def _synthesize_sync(self, text: str, language: str) -> bytes:
         """Synchronous TTS synthesis (runs in thread via asyncio.to_thread).
@@ -112,8 +127,18 @@ class GoogleCloudTTSProvider(TTSProvider):
             raise ProviderError(self.name, "quota_exceeded")
 
         voice_config = _VOICES.get(language, _VOICES["en"])
+
+        # Check TTS cache before making an API call
+        cache = get_tts_cache()
+        cached = cache.get(text, voice_config["voice_name"], language)
+        if cached is not None:
+            logger.info(
+                "GoogleCloudTTS: cache_hit=True, text_len=%d", len(text),
+            )
+            return cached
+
         logger.info(
-            "GoogleCloudTTS: voice=%s, language=%s, text_len=%d",
+            "GoogleCloudTTS: cache_hit=False, voice=%s, language=%s, text_len=%d",
             voice_config["voice_name"], language, len(text),
         )
 
@@ -126,8 +151,9 @@ class GoogleCloudTTSProvider(TTSProvider):
             if not audio_bytes:
                 raise ProviderError(self.name, "Google TTS returned empty audio")
 
-            # Record successful usage
+            # Record successful usage and cache the result
             self._quota_tracker.record_usage(len(text))
+            cache.put(text, voice_config["voice_name"], language, audio_bytes)
             logger.debug("GoogleCloudTTS: synthesized %d bytes", len(audio_bytes))
             return audio_bytes
 

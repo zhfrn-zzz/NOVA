@@ -40,3 +40,9 @@ htmlcov/
 # Google Cloud credentials
 **/google-cloud-tts-key.json
 *.json.bak
+
+# Tuya
+tuya-raw.json
+devices.json
+snapshot.json
+tinytuya.json

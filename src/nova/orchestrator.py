@@ -118,6 +118,12 @@ class Orchestrator:
             embedding_fn=self._embedding_fn,
         )
 
+        # Pre-initialize TTS clients (non-blocking, safe if no loop yet)
+        try:
+            asyncio.ensure_future(self._warmup_tts())
+        except RuntimeError:
+            pass  # No event loop yet — warmup will happen on first interaction
+
         # Backfill existing memories without embeddings
         if self._embedding_fn:
             asyncio.ensure_future(self._backfill_startup())
@@ -205,16 +211,26 @@ class Orchestrator:
             return ""
 
     async def _warmup_tts(self) -> None:
-        """Pre-initialize Edge TTS connection for faster first request."""
+        """Pre-initialize TTS provider clients for faster first request.
+
+        Warms up ALL providers that expose a ``warm_up()`` method (Google
+        Cloud TTS gRPC channel, Edge TTS websocket, etc.) so the very
+        first synthesis call doesn't pay for client construction latency.
+        """
         if self._tts_warmed_up:
             return
-        try:
-            provider = self._tts_router.providers[0]
-            if hasattr(provider, "warmup"):
-                await provider.warmup()
-            self._tts_warmed_up = True
-        except Exception:
-            logger.debug("TTS warmup failed (non-critical)")
+        for provider in self._tts_router.providers:
+            try:
+                if hasattr(provider, "warm_up"):
+                    await provider.warm_up()
+                elif hasattr(provider, "warmup"):
+                    await provider.warmup()
+            except Exception:
+                logger.debug(
+                    "TTS warmup failed for %s (non-critical)",
+                    getattr(provider, "name", "unknown"),
+                )
+        self._tts_warmed_up = True
 
     def _inject_passive_notifications(self) -> None:
         """Check for pending notifications and inject into prompt context.

@@ -256,6 +256,11 @@ class StreamingTTSPlayer:
         Each sentence is synthesized and played as it arrives, so audio
         starts playing before the full LLM response is complete.
 
+        Uses a sentence (text) queue with consumer-side prefetch:
+        the producer pushes text quickly (never blocked by synthesis),
+        and the consumer synthesizes with 1-item look-ahead so the next
+        sentence's audio is being prepared while the current one plays.
+
         Args:
             sentence_stream: Async iterator yielding complete sentences
                 from the LLM streaming response.
@@ -268,13 +273,15 @@ class StreamingTTSPlayer:
         from nova.providers.tts.edge_tts_provider import detect_language
 
         tts_start = time.perf_counter()
-        audio_queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=2)
+        # Queue carries sentences (text), not audio — the consumer synthesizes
+        sentence_queue: asyncio.Queue[str | None] = asyncio.Queue(maxsize=4)
         all_sentences: list[str] = []
         first_audio_time: float | None = None
         detected_lang = language
 
         async def producer() -> None:
-            nonlocal first_audio_time, detected_lang
+            """Read sentences from LLM stream and push text to queue."""
+            nonlocal detected_lang
             i = 0
             try:
                 async for sentence in sentence_stream:
@@ -288,27 +295,60 @@ class StreamingTTSPlayer:
                             detected_lang, sentence[:40],
                         )
 
-                    try:
-                        audio = await tts_router.execute(
-                            "synthesize", _strip_markdown(sentence), detected_lang,
-                        )
-                        if i == 0 and first_audio_time is None:
-                            first_audio_time = time.perf_counter() - tts_start
-                        await audio_queue.put(audio)
-                    except Exception:
-                        logger.warning(
-                            "LLM→TTS stream: synthesis failed for sentence %d: %r",
-                            i, sentence[:50], exc_info=True,
-                        )
+                    await sentence_queue.put(sentence)
                     i += 1
             finally:
-                await audio_queue.put(None)
+                await sentence_queue.put(None)
+
+        async def _synthesize(text: str) -> bytes | None:
+            """Synthesize a single sentence, returning None on failure."""
+            try:
+                return await tts_router.execute(
+                    "synthesize", _strip_markdown(text), detected_lang,
+                )
+            except Exception:
+                logger.warning(
+                    "LLM→TTS stream: synthesis failed: %r",
+                    text[:50], exc_info=True,
+                )
+                return None
 
         async def consumer() -> None:
-            while True:
-                audio = await audio_queue.get()
+            """Synthesize and play with 1-item prefetch."""
+            nonlocal first_audio_time
+            prefetch_task: asyncio.Task | None = None
+            done = False
+
+            while not done:
+                # Get audio: from prefetch task or synthesize now
+                if prefetch_task is not None:
+                    audio = await prefetch_task
+                    prefetch_task = None
+                else:
+                    sentence = await sentence_queue.get()
+                    if sentence is None:
+                        break
+                    audio = await _synthesize(sentence)
+                    if audio is not None and first_audio_time is None:
+                        first_audio_time = time.perf_counter() - tts_start
+
                 if audio is None:
-                    break
+                    continue
+
+                # Before playing, prefetch next sentence's audio
+                if not sentence_queue.empty():
+                    try:
+                        next_item = sentence_queue.get_nowait()
+                        if next_item is None:
+                            done = True  # exit after playing current audio
+                        else:
+                            prefetch_task = asyncio.create_task(
+                                _synthesize(next_item),
+                            )
+                    except asyncio.QueueEmpty:
+                        pass
+
+                # Play current audio — prefetch runs concurrently
                 try:
                     await play_audio(audio)
                 except Exception:
