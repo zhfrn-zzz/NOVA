@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS reminders (
     is_alarm    BOOLEAN DEFAULT 0,
     urgency     INTEGER DEFAULT 2,
     recurring   TEXT,
+    action_json TEXT,
     delivered   BOOLEAN DEFAULT 0,
     created_at  TEXT NOT NULL,
     delivered_at TEXT
@@ -184,6 +185,7 @@ class MemoryStore:
         self._embedding_fn = None
 
         self._init_schema()
+        self._migrate_reminders_action()
         self._migrate_legacy_json()
 
     def _init_schema(self) -> None:
@@ -201,6 +203,15 @@ class MemoryStore:
                 pass  # Already exists
         self._conn.commit()
         logger.info("Memory store initialized: %s", self._db_path)
+
+    def _migrate_reminders_action(self) -> None:
+        """Add action_json column to reminders table if missing (safe migration)."""
+        try:
+            self._conn.execute("ALTER TABLE reminders ADD COLUMN action_json TEXT")
+            self._conn.commit()
+            logger.info("Migrated reminders table: added action_json column")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
 
     def _migrate_legacy_json(self) -> None:
         """Migrate facts from ~/.nova/memory.json to SQLite if present."""
@@ -630,6 +641,7 @@ class MemoryStore:
         is_alarm: bool = False,
         urgency: int = 2,
         recurring: str | None = None,
+        action: dict | None = None,
     ) -> int:
         """Add a new reminder.
 
@@ -640,17 +652,20 @@ class MemoryStore:
             is_alarm: If True, bypasses quiet hours.
             urgency: 1=passive, 2=gentle, 3=active.
             recurring: null | "daily" | "weekly" | "weekdays".
+            action: Optional IoT action to execute when reminder fires.
+                    Dict with keys: device, action, value (optional).
 
         Returns:
             The reminder ID.
         """
         now = datetime.now().isoformat()
+        action_json = json.dumps(action) if action else None
         cursor = self._conn.execute(
             "INSERT INTO reminders "
             "(message, remind_at, lead_time, is_alarm, urgency, recurring, "
-            "created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "action_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (message, remind_at, lead_time, int(is_alarm), urgency,
-             recurring, now),
+             recurring, action_json, now),
         )
         self._conn.commit()
         logger.info(
@@ -677,7 +692,7 @@ class MemoryStore:
         now_str = now.isoformat()
         sql = """
             SELECT id, message, remind_at, lead_time, is_alarm,
-                   urgency, recurring
+                   urgency, recurring, action_json
             FROM reminders
             WHERE delivered = 0
               AND datetime(remind_at, '-' || lead_time || ' minutes')
@@ -699,6 +714,7 @@ class MemoryStore:
                 "is_alarm": bool(row["is_alarm"]),
                 "urgency": row["urgency"],
                 "recurring": row["recurring"],
+                "action": json.loads(row["action_json"]) if row["action_json"] else None,
             })
         return results
 

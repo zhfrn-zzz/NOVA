@@ -105,15 +105,19 @@ class HeartbeatScheduler:
             time_until = (r["remind_at"] - now).total_seconds() / 60
             urgency = self._calculate_dynamic_urgency(time_until)
 
-            # Quiet hours: downgrade non-alarm to PASSIVE
-            if self._is_quiet(now) and not r["is_alarm"]:
-                urgency = Urgency.PASSIVE
-
-            # Ambient noise gate: very quiet → likely away/sleeping
-            if self._ambient_fn and urgency == Urgency.GENTLE:
-                ambient = self._ambient_fn()
-                if ambient < self._config.ambient_presence_threshold:
+            # Action reminders always fire immediately regardless of quiet hours
+            if r.get("action"):
+                urgency = Urgency.ACTIVE
+            else:
+                # Quiet hours: downgrade non-alarm to PASSIVE
+                if self._is_quiet(now) and not r["is_alarm"]:
                     urgency = Urgency.PASSIVE
+
+                # Ambient noise gate: very quiet → likely away/sleeping
+                if self._ambient_fn and urgency == Urgency.GENTLE:
+                    ambient = self._ambient_fn()
+                    if ambient < self._config.ambient_presence_threshold:
+                        urgency = Urgency.PASSIVE
 
             self._queue.push(Notification(
                 message=r["message"],
@@ -121,6 +125,7 @@ class HeartbeatScheduler:
                 source="reminder",
                 created_at=now,
                 reminder_id=r["id"],
+                action=r.get("action"),
             ))
 
             # Mark as delivered

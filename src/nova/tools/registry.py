@@ -510,7 +510,9 @@ _FUNCTION_DECLARATIONS = [
             "Set a reminder. For relative times ('2 menit lagi', 'setengah jam lagi', "
             "'1 jam lagi'), use delay_minutes. For absolute times ('besok jam 8', "
             "'jam 3 sore'), use remind_at with ISO 8601. One of remind_at or "
-            "delay_minutes must be provided. If both given, delay_minutes wins."
+            "delay_minutes must be provided. If both given, delay_minutes wins. "
+            "Jika user minta 'matiin AC 1 jam lagi', 'nyalain tv besok jam 8', dll., "
+            "isi juga field 'action' agar perangkat dikontrol otomatis saat reminder fire."
         ),
         parameters_json_schema={
             "type": "object",
@@ -549,6 +551,37 @@ _FUNCTION_DECLARATIONS = [
                         "Recurrence pattern: 'daily', 'weekly', 'weekdays', "
                         "or omit for one-time reminder."
                     ),
+                },
+                "action": {
+                    "type": "object",
+                    "description": (
+                        "Opsional: IoT action yang otomatis dieksekusi saat reminder fire. "
+                        "Gunakan saat user minta 'matiin AC 1 jam lagi', "
+                        "'nyalain tv atas 20 menit lagi', 'matiin tv bawah besok', dll. "
+                        "Jangan isi ini jika reminder hanya pengingat teks biasa."
+                    ),
+                    "properties": {
+                        "device": {
+                            "type": "string",
+                            "description": "'ac', 'tv_atas', atau 'tv_bawah'.",
+                        },
+                        "command": {
+                            "type": "string",
+                            "description": (
+                                "Perintah ke perangkat: "
+                                "'on', 'off', 'set_temp', 'set_mode', 'set_fan', "
+                                "'volume_up', 'volume_down', 'set_volume', dll."
+                            ),
+                        },
+                        "value": {
+                            "type": "string",
+                            "description": (
+                                "Opsional: nilai tambahan, misal suhu '24', "
+                                "volume '50', nama app 'youtube'."
+                            ),
+                        },
+                    },
+                    "required": ["device", "command"],
                 },
             },
             "required": ["message"],
@@ -895,6 +928,37 @@ def get_tool_declarations() -> list[types.Tool]:
         A list containing a single Tool with all function declarations.
     """
     return [types.Tool(function_declarations=_FUNCTION_DECLARATIONS)]
+
+
+# Cached OpenAI-format tool list (built once on first call)
+_openai_tools_cache: list[dict] | None = None
+
+
+def get_tool_declarations_openai() -> list[dict]:
+    """Return tool declarations in OpenAI function-calling format.
+
+    Converts Gemini FunctionDeclaration objects to OpenAI-compatible dicts
+    for use with Groq and other OpenAI-compatible APIs.
+
+    Returns:
+        List of tool dicts in OpenAI format.
+    """
+    global _openai_tools_cache
+    if _openai_tools_cache is not None:
+        return _openai_tools_cache
+
+    tools = []
+    for decl in _FUNCTION_DECLARATIONS:
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": decl.name,
+                "description": decl.description,
+                "parameters": decl.parameters_json_schema or {"type": "object", "properties": {}},
+            },
+        })
+    _openai_tools_cache = tools
+    return tools
 
 
 async def execute_tool(name: str, args: dict | None = None) -> str:

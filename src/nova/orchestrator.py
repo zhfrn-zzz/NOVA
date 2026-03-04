@@ -568,6 +568,8 @@ class Orchestrator:
         """Generate and speak a notification message via LLM + TTS.
 
         Used for ACTIVE notifications that need to be spoken immediately.
+        If the notification carries an IoT action, it is executed first
+        before announcing the result.
 
         Args:
             notification: The notification to deliver.
@@ -575,12 +577,49 @@ class Orchestrator:
         Returns:
             The generated notification text.
         """
+        # Execute IoT action if attached to this reminder
+        action_result: str | None = None
+        if notification.action:
+            try:
+                from nova.tools.iot import control_device
+                act = notification.action
+                # Schema uses "command" to avoid naming collision with the
+                # outer "action" key; map it back to control_device's "action".
+                action_result = await control_device(
+                    device=act["device"],
+                    action=act.get("command") or act.get("action", ""),
+                    value=act.get("value", ""),
+                )
+                logger.info(
+                    "Action reminder executed: %s → %s",
+                    notification.action, action_result,
+                )
+            except Exception:
+                logger.exception("Action reminder IoT execution failed")
+                action_result = "gagal dieksekusi"
+
+        # Build prompt based on what happened
         if notification.message == "__morning_greeting__":
             prompt = "Deliver a brief, warm morning greeting."
         elif notification.message == "__sleep_reminder__":
             prompt = "Gently remind the user it's late and time to rest."
+        elif action_result is not None:
+            device = notification.action.get("device", "perangkat")  # type: ignore[union-attr]
+            action_name = (  # type: ignore[union-attr]
+                notification.action.get("command")
+                or notification.action.get("action", "dikontrol")
+            )
+            prompt = (
+                f"Hasil eksekusi otomatis: {action_result}. "
+                f"Beritahu user dengan singkat bahwa {device} sudah {action_name} "
+                f"secara otomatis sesuai reminder '{notification.message}'. "
+                "Maksimal 1 kalimat pendek."
+            )
         else:
-            prompt = f"Katakan persis ini ke user: 'Tuan, pengingat: {notification.message}.' Jangan tambahkan apapun selain itu."
+            prompt = (
+                f"Katakan persis ini ke user: 'Tuan, pengingat: {notification.message}.' "
+                "Jangan tambahkan apapun selain itu."
+            )
 
         # Use LLM to generate natural wording, then TTS
         try:

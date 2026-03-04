@@ -35,7 +35,8 @@ class TestTuyaCloudDriver:
         call_args = mock_cloud._tuyaplatform.call_args
         assert "command" in call_args[0][0]  # uri
         assert call_args[1]["action"] == "POST"
-        assert call_args[1]["post"]["code"] == "PowerOn"
+        assert call_args[1]["post"]["code"] == "power"
+        assert call_args[1]["post"]["value"] == 1
 
     @patch("nova.iot.tuya_cloud.tinytuya.Cloud")
     @pytest.mark.asyncio
@@ -61,7 +62,7 @@ class TestTuyaCloudDriver:
 
         assert "24" in result
         call_args = mock_cloud._tuyaplatform.call_args
-        assert call_args[1]["post"]["code"] == "T"
+        assert call_args[1]["post"]["code"] == "temp"
         assert call_args[1]["post"]["value"] == 24
 
     @patch("nova.iot.tuya_cloud.tinytuya.Cloud")
@@ -76,7 +77,7 @@ class TestTuyaCloudDriver:
 
         assert "cool" in result
         call_args = mock_cloud._tuyaplatform.call_args
-        assert call_args[1]["post"]["code"] == "M"
+        assert call_args[1]["post"]["code"] == "mode"
         assert call_args[1]["post"]["value"] == 0
 
     @patch("nova.iot.tuya_cloud.tinytuya.Cloud")
@@ -648,3 +649,156 @@ class TestIoTInRegistry:
         decls = tools[0].function_declarations
         names = [d.name for d in decls]
         assert "control_device" in names
+
+
+# ── Action Reminder tests ─────────────────────────────────────────────
+
+
+class TestActionReminders:
+    """Test action reminder flow: store → retrieve → notify → execute."""
+
+    def _make_store(self, tmp_path):
+        from nova.memory.memory_store import MemoryStore
+        return MemoryStore(db_path=str(tmp_path / "test.db"))
+
+    def test_add_reminder_with_action_stores_json(self, tmp_path):
+        """add_reminder stores action_json in DB when action is provided."""
+        import json
+        store = self._make_store(tmp_path)
+        action = {"device": "tv_atas", "action": "off"}
+        rid = store.add_reminder(
+            message="matiin tv atas",
+            remind_at="2099-01-01T00:00:00",
+            action=action,
+        )
+        # Read raw from DB
+        row = store._conn.execute(
+            "SELECT action_json FROM reminders WHERE id = ?", (rid,)
+        ).fetchone()
+        assert row is not None
+        assert json.loads(row["action_json"]) == action
+
+    def test_add_reminder_without_action_stores_null(self, tmp_path):
+        """add_reminder stores NULL action_json when no action provided."""
+        store = self._make_store(tmp_path)
+        rid = store.add_reminder(
+            message="pengingat biasa",
+            remind_at="2099-01-01T00:00:00",
+        )
+        row = store._conn.execute(
+            "SELECT action_json FROM reminders WHERE id = ?", (rid,)
+        ).fetchone()
+        assert row["action_json"] is None
+
+    def test_get_pending_reminders_includes_action(self, tmp_path):
+        """get_pending_reminders returns action dict from stored action_json."""
+        from datetime import datetime, timedelta
+        store = self._make_store(tmp_path)
+        action = {"device": "ac", "action": "off"}
+        store.add_reminder(
+            message="matiin AC",
+            remind_at=(datetime.now() + timedelta(seconds=1)).isoformat(),
+            lead_time=0,
+            action=action,
+        )
+        now = datetime.now() + timedelta(seconds=2)
+        pending = store.get_pending_reminders(now, window_minutes=0)
+        assert len(pending) == 1
+        assert pending[0]["action"] == action
+
+    def test_get_pending_reminders_action_none_when_not_set(self, tmp_path):
+        """get_pending_reminders returns action=None when not set."""
+        from datetime import datetime, timedelta
+        store = self._make_store(tmp_path)
+        store.add_reminder(
+            message="biasa",
+            remind_at=(datetime.now() + timedelta(seconds=1)).isoformat(),
+            lead_time=0,
+        )
+        now = datetime.now() + timedelta(seconds=2)
+        pending = store.get_pending_reminders(now, window_minutes=0)
+        assert len(pending) == 1
+        assert pending[0]["action"] is None
+
+    def test_notification_carries_action(self, tmp_path):
+        """Scheduler passes action from reminder dict to Notification."""
+        from datetime import datetime, timedelta
+
+        from nova.heartbeat.queue import Notification, NotificationQueue, Urgency
+        from nova.heartbeat.scheduler import HeartbeatScheduler
+        from nova.memory.memory_store import MemoryStore
+
+        store = MemoryStore(db_path=str(tmp_path / "test.db"))
+        queue = NotificationQueue()
+        scheduler = HeartbeatScheduler(memory_store=store, notification_queue=queue)
+
+        action = {"device": "tv_bawah", "action": "off"}
+        store.add_reminder(
+            message="matiin tv bawah",
+            remind_at=(datetime.now() + timedelta(seconds=1)).isoformat(),
+            lead_time=0,
+            action=action,
+        )
+
+        now = datetime.now() + timedelta(seconds=2)
+        scheduler._check_reminders(now)
+
+        assert queue.size() == 1
+        notif = queue.get_next_urgent()
+        assert notif is not None
+        assert notif.action == action
+        assert notif.urgency == Urgency.ACTIVE
+
+    def test_notification_without_action_not_forced_active(self, tmp_path):
+        """Regular reminders (no action) follow normal urgency — not forced ACTIVE."""
+        from datetime import datetime, timedelta
+
+        from nova.heartbeat.queue import NotificationQueue, Urgency
+        from nova.heartbeat.scheduler import HeartbeatScheduler
+        from nova.memory.memory_store import MemoryStore
+
+        store = MemoryStore(db_path=str(tmp_path / "test.db"))
+        queue = NotificationQueue()
+        scheduler = HeartbeatScheduler(memory_store=store, notification_queue=queue)
+
+        # remind_at = now + 15 min, lead_time = 20 → fires now (remind_at - lead = now-5)
+        # time_until = 15 min → _calculate_dynamic_urgency returns GENTLE (not ACTIVE)
+        now = datetime.now()
+        remind_at = now + timedelta(minutes=15)
+        store.add_reminder(
+            message="biasa",
+            remind_at=remind_at.isoformat(),
+            lead_time=20,
+        )
+
+        scheduler._check_reminders(now)
+
+        assert queue.size() == 1
+        notif = queue.get_next_urgent()
+        assert notif is not None
+        assert notif.urgency == Urgency.GENTLE  # natural urgency, not forced ACTIVE
+
+    @pytest.mark.asyncio
+    async def test_set_reminder_tool_with_action(self, tmp_path):
+        """set_reminder tool passes action through to memory store."""
+        import json
+
+        from nova.memory.memory_store import MemoryStore
+
+        store = MemoryStore(db_path=str(tmp_path / "test.db"))
+        with patch("nova.tools.heartbeat_reminders.get_memory_store", return_value=store):
+            from nova.tools.heartbeat_reminders import set_reminder
+            action = {"device": "tv_atas", "action": "off"}
+            result = await set_reminder(
+                message="matiin tv atas",
+                delay_minutes=20,
+                action=action,
+            )
+
+        assert "tv_atas" in result
+        assert "off" in result
+        # Verify DB
+        row = store._conn.execute(
+            "SELECT action_json FROM reminders ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        assert json.loads(row["action_json"]) == action

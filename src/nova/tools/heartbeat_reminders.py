@@ -20,6 +20,7 @@ async def set_reminder(
     lead_time: int = 5,
     is_alarm: bool = False,
     recurring: str | None = None,
+    action: dict | None = None,
 ) -> str:
     """Set a reminder at a specific datetime or after a delay.
 
@@ -31,6 +32,8 @@ async def set_reminder(
         lead_time: Minutes before remind_at to notify (default 5).
         is_alarm: If True, bypasses quiet hours.
         recurring: null | "daily" | "weekly" | "weekdays".
+        action: Optional IoT action to execute automatically when reminder fires.
+                Dict with keys: device, action, value (optional).
 
     Returns:
         Confirmation message.
@@ -66,6 +69,7 @@ async def set_reminder(
         lead_time=lead_time,
         is_alarm=is_alarm,
         recurring=recurring,
+        action=action,
     )
 
     formatted = dt.strftime("%d %b %Y %H:%M")
@@ -74,8 +78,14 @@ async def set_reminder(
         result += f" (notifikasi {lead_time} menit sebelumnya)"
     if recurring:
         result += f" [recurring: {recurring}]"
+    if action:
+        cmd = action.get("command") or action.get("action", "?")
+        result += f" (akan otomatis eksekusi: {action['device']} → {cmd})"
 
-    logger.info("Tool set_reminder → #%d, at=%s, msg=%r", rid, remind_at, message)
+    logger.info(
+        "Tool set_reminder → #%d, at=%s, msg=%r, action=%r",
+        rid, remind_at, message, action,
+    )
     return result
 
 

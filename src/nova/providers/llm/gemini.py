@@ -30,7 +30,7 @@ def _build_system_prompt() -> str:
     return get_prompt_assembler().build()
 
 # Models in order of preference
-_MODELS = ["gemini-2.5-flash", "gemini-3-flash-preview"]
+_MODELS = ["gemini-3.1-flash-lite-preview", "gemini-3-flash"]
 
 # Maximum number of function-call round-trips to prevent infinite loops
 _MAX_TOOL_CALLS = 3
@@ -138,6 +138,24 @@ def _build_contents(
     return contents
 
 
+def _prepare_gemini_tools(tools: list[types.Tool]) -> list[types.Tool]:
+    """Return tools as-is for Gemini function calling.
+
+    Note: Google Search grounding (google_search) cannot be combined with
+    custom Function Declarations in the same request — the Gemini API
+    returns 400 INVALID_ARGUMENT if both are present. We therefore keep
+    the custom web_search declaration (DuckDuckGo-based) and skip the
+    native grounding tool.
+
+    Args:
+        tools: Original tool list from the registry.
+
+    Returns:
+        Tool list unchanged.
+    """
+    return list(tools)
+
+
 class GeminiProvider(LLMProvider):
     """LLM provider using Google Gemini via the google-genai SDK."""
 
@@ -164,17 +182,21 @@ class GeminiProvider(LLMProvider):
     ) -> types.GenerateContentConfig:
         """Build the generation config with system instruction and optional tools.
 
+        Replaces the custom ``web_search`` function declaration with Gemini's
+        native Google Search grounding for faster, integrated search results.
+
         Args:
             tools: Optional list of Tool objects for function calling.
 
         Returns:
             GenerateContentConfig instance.
         """
+        gemini_tools = _prepare_gemini_tools(tools) if tools else None
         return types.GenerateContentConfig(
             system_instruction=_build_system_prompt(),
-            tools=tools,
+            tools=gemini_tools,
             temperature=0.3,
-            max_output_tokens=512,
+            max_output_tokens=1024,
         )
 
     async def generate(

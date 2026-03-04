@@ -28,6 +28,7 @@ class Notification:
     source: str              # "reminder" | "rule" | "system"
     created_at: datetime
     reminder_id: int | None = None
+    action: dict | None = None   # IoT action to execute automatically when fired
     attempts: int = 0
     max_attempts: int = 3
 

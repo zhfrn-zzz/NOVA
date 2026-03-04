@@ -27,6 +27,27 @@ _TV_REMOTE_ID = "a31c92a675b6ccc8504k2v"
 AC_MODES = {0: "cool", 1: "heat", 2: "auto", 3: "fan", 4: "dry"}
 AC_FAN_SPEEDS = {0: "auto", 1: "low", 2: "medium", 3: "high"}
 
+# Tuya IR category ID for TV remotes
+_TV_CATEGORY_ID = 2
+
+# Map high-level command names → Tuya raw key names
+_TV_KEY_MAP = {
+    "Power": "power",
+    "Volume+": "volume+",
+    "Volume-": "volume-",
+    "Channel+": "channel+",
+    "Channel-": "channel-",
+    "Up": "up",
+    "Down": "down",
+    "Left": "left",
+    "Right": "right",
+    "OK": "ok",
+    "Home": "home",
+    "Back": "back",
+    "Menu": "menu",
+    "Mute": "mute",
+}
+
 
 class TuyaCloudDriver:
     """Controls Tuya IR sub-devices via Cloud API.
@@ -86,13 +107,17 @@ class TuyaCloudDriver:
         mode: int | None = None,
         fan: int | None = None,
     ) -> str:
-        """Send command to AC via IR hub (synchronous)."""
+        """Send command to AC via IR hub (synchronous).
+
+        Uses the Tuya AC-specific endpoint:
+        POST /v2.0/infrareds/{infrared_id}/air-conditioners/{remote_id}/command
+        with body {"code": "power|temp|mode|wind", "value": <int>}.
+        """
         results = []
-        uri = f"infrareds/{_IR_HUB_ID}/remotes/{_AC_REMOTE_ID}/command"
+        uri = f"infrareds/{_IR_HUB_ID}/air-conditioners/{_AC_REMOTE_ID}/command"
 
         if power is not None:
-            code = "PowerOn" if power else "PowerOff"
-            resp = self._post(uri, {"code": code})
+            resp = self._post(uri, {"code": "power", "value": 1 if power else 0})
             success = resp.get("success", False) if isinstance(resp, dict) else False
             if success:
                 results.append("dinyalakan" if power else "dimatikan")
@@ -101,7 +126,7 @@ class TuyaCloudDriver:
                 return f"Gagal {'menyalakan' if power else 'mematikan'} AC."
 
         if temp is not None:
-            resp = self._post(uri, {"code": "T", "value": temp})
+            resp = self._post(uri, {"code": "temp", "value": temp})
             success = resp.get("success", False) if isinstance(resp, dict) else False
             if success:
                 results.append(f"suhu {temp}°C")
@@ -110,7 +135,7 @@ class TuyaCloudDriver:
                 return f"Gagal mengatur suhu AC ke {temp}°C."
 
         if mode is not None:
-            resp = self._post(uri, {"code": "M", "value": mode})
+            resp = self._post(uri, {"code": "mode", "value": mode})
             success = resp.get("success", False) if isinstance(resp, dict) else False
             if success:
                 mode_name = AC_MODES.get(mode, str(mode))
@@ -120,7 +145,7 @@ class TuyaCloudDriver:
                 return "Gagal mengatur mode AC."
 
         if fan is not None:
-            resp = self._post(uri, {"code": "F", "value": fan})
+            resp = self._post(uri, {"code": "wind", "value": fan})
             success = resp.get("success", False) if isinstance(resp, dict) else False
             if success:
                 fan_name = AC_FAN_SPEEDS.get(fan, str(fan))
@@ -135,14 +160,20 @@ class TuyaCloudDriver:
         return "AC " + ", ".join(results) + "."
 
     def _send_tv_ir_command_sync(self, command: str) -> str:
-        """Send IR command to TV (synchronous)."""
-        uri = f"infrareds/{_IR_HUB_ID}/remotes/{_TV_REMOTE_ID}/command"
-        resp = self._post(uri, {"code": command})
+        """Send IR command to TV (synchronous).
+
+        Uses the Tuya raw key command endpoint:
+        POST /v2.0/infrareds/{infrared_id}/remotes/{remote_id}/raw/command
+        with body {"category_id": 2, "key": "<key_name>"}.
+        """
+        uri = f"infrareds/{_IR_HUB_ID}/remotes/{_TV_REMOTE_ID}/raw/command"
+        key = _TV_KEY_MAP.get(command, command.lower())
+        resp = self._post(uri, {"category_id": _TV_CATEGORY_ID, "key": key})
         success = resp.get("success", False) if isinstance(resp, dict) else False
         if success:
-            logger.info("TV IR command sent: %s", command)
+            logger.info("TV IR command sent: %s (key=%s)", command, key)
             return f"Perintah TV IR '{command}' berhasil dikirim."
-        logger.warning("TV IR command failed: %s → %s", command, resp)
+        logger.warning("TV IR command failed: %s (key=%s) → %s", command, key, resp)
         return f"Gagal mengirim perintah TV IR '{command}'."
 
     async def send_ac_command(
