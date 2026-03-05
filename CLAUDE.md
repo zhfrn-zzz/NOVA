@@ -216,6 +216,7 @@ nova/
 - [x] Task 48: Dead code cleanup — removed legacy context.py, dead UserMemory class from persistent.py, broken TestUserMemory/TestRemindersTools tests, fixed test_all_tools.py imports, deleted test output artifacts (Phase 5)
 - [x] Task 49: TTFA optimization — sub-sentence clause flushing for first sentence, Google Cloud TTS client pre-init at startup, in-memory TTS audio cache (LRU), parallel TTS prefetch in streaming consumer (Phase 5)
 - [x] Task 50: IoT integration Phase 1 — AC control via Tuya Cloud IR, TV Atas (IR+WebOS), TV Bawah (WebOS only), control_device tool, smart dispatch (Phase 6)
+- [x] Task 51: TV music playback — play_music target param for TV Atas/Bawah via WebOS YouTube deep-link, auto IR power-on (Phase 6)
 
 ## Important Notes
 
