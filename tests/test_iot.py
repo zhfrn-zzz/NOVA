@@ -297,7 +297,7 @@ class TestControlDevice:
         result = await control_device("lamp", "on")
         assert "tidak dikenali" in result
 
-    @patch("nova.tools.iot._get_tuya_driver")
+    @patch("nova.tools.iot.get_tuya_driver")
     @pytest.mark.asyncio
     async def test_ac_on(self, mock_get_tuya):
         mock_driver = AsyncMock()
@@ -310,7 +310,7 @@ class TestControlDevice:
         assert "dinyalakan" in result
         mock_driver.send_ac_command.assert_awaited_once_with(power=True)
 
-    @patch("nova.tools.iot._get_tuya_driver")
+    @patch("nova.tools.iot.get_tuya_driver")
     @pytest.mark.asyncio
     async def test_ac_off(self, mock_get_tuya):
         mock_driver = AsyncMock()
@@ -322,7 +322,7 @@ class TestControlDevice:
 
         assert "dimatikan" in result
 
-    @patch("nova.tools.iot._get_tuya_driver")
+    @patch("nova.tools.iot.get_tuya_driver")
     @pytest.mark.asyncio
     async def test_ac_set_temp(self, mock_get_tuya):
         mock_driver = AsyncMock()
@@ -346,7 +346,7 @@ class TestControlDevice:
         result = await control_device("ac", "set_temp", "abc")
         assert "16-30" in result
 
-    @patch("nova.tools.iot._get_tuya_driver")
+    @patch("nova.tools.iot.get_tuya_driver")
     @pytest.mark.asyncio
     async def test_ac_set_mode_by_number(self, mock_get_tuya):
         mock_driver = AsyncMock()
@@ -357,7 +357,7 @@ class TestControlDevice:
         await control_device("ac", "set_mode", "0")
         mock_driver.send_ac_command.assert_awaited_once_with(power=True, mode=0)
 
-    @patch("nova.tools.iot._get_tuya_driver")
+    @patch("nova.tools.iot.get_tuya_driver")
     @pytest.mark.asyncio
     async def test_ac_set_mode_by_name(self, mock_get_tuya):
         mock_driver = AsyncMock()
@@ -374,7 +374,7 @@ class TestControlDevice:
         result = await control_device("ac", "set_mode", "turbo")
         assert "tidak valid" in result
 
-    @patch("nova.tools.iot._get_tuya_driver")
+    @patch("nova.tools.iot.get_tuya_driver")
     @pytest.mark.asyncio
     async def test_ac_set_fan(self, mock_get_tuya):
         mock_driver = AsyncMock()
@@ -393,7 +393,7 @@ class TestControlDevice:
 
     # ── TV Atas tests ────────────────────────────────────────────
 
-    @patch("nova.tools.iot._get_tuya_driver")
+    @patch("nova.tools.iot.get_tuya_driver")
     @pytest.mark.asyncio
     async def test_tv_atas_power_on_uses_ir(self, mock_get_tuya):
         mock_driver = AsyncMock()
@@ -405,7 +405,7 @@ class TestControlDevice:
 
         mock_driver.send_tv_ir_command.assert_awaited_once_with("Power")
 
-    @patch("nova.tools.iot._get_tv_atas_webos")
+    @patch("nova.tools.iot.get_tv_atas_webos")
     @pytest.mark.asyncio
     async def test_tv_atas_off_uses_webos(self, mock_get_webos):
         mock_webos = AsyncMock()
@@ -417,8 +417,8 @@ class TestControlDevice:
 
         assert "dimatikan" in result
 
-    @patch("nova.tools.iot._get_tv_atas_webos")
-    @patch("nova.tools.iot._get_tuya_driver")
+    @patch("nova.tools.iot.get_tv_atas_webos")
+    @patch("nova.tools.iot.get_tuya_driver")
     @pytest.mark.asyncio
     async def test_tv_atas_off_fallback_to_ir(self, mock_get_tuya, mock_get_webos):
         """If WebOS fails, fall back to IR for power off."""
@@ -435,7 +435,7 @@ class TestControlDevice:
 
         mock_driver.send_tv_ir_command.assert_awaited_once_with("Power")
 
-    @patch("nova.tools.iot._get_tv_atas_webos")
+    @patch("nova.tools.iot.get_tv_atas_webos")
     @pytest.mark.asyncio
     async def test_tv_atas_open_app(self, mock_get_webos):
         mock_webos = AsyncMock()
@@ -447,7 +447,7 @@ class TestControlDevice:
 
         assert "youtube" in result.lower()
 
-    @patch("nova.tools.iot._get_tv_atas_webos")
+    @patch("nova.tools.iot.get_tv_atas_webos")
     @pytest.mark.asyncio
     async def test_tv_atas_set_volume(self, mock_get_webos):
         mock_webos = AsyncMock()
@@ -459,7 +459,7 @@ class TestControlDevice:
 
         assert "30" in result
 
-    @patch("nova.tools.iot._get_tuya_driver")
+    @patch("nova.tools.iot.get_tuya_driver")
     @pytest.mark.asyncio
     async def test_tv_atas_channel_up_uses_ir(self, mock_get_tuya):
         mock_driver = AsyncMock()
@@ -471,7 +471,7 @@ class TestControlDevice:
 
         mock_driver.send_tv_ir_command.assert_awaited_once_with("Channel+")
 
-    @patch("nova.tools.iot._get_tuya_driver")
+    @patch("nova.tools.iot.get_tuya_driver")
     @pytest.mark.asyncio
     async def test_tv_atas_navigation_uses_ir(self, mock_get_tuya):
         mock_driver = AsyncMock()
@@ -504,7 +504,7 @@ class TestControlDevice:
             result = await control_device("tv_bawah", action)
             assert "tidak tersedia" in result
 
-    @patch("nova.tools.iot._get_tv_bawah_webos")
+    @patch("nova.tools.iot.get_tv_bawah_webos")
     @pytest.mark.asyncio
     async def test_tv_bawah_off(self, mock_get_webos):
         mock_webos = AsyncMock()
@@ -516,7 +516,7 @@ class TestControlDevice:
 
         assert "dimatikan" in result
 
-    @patch("nova.tools.iot._get_tv_bawah_webos")
+    @patch("nova.tools.iot.get_tv_bawah_webos")
     @pytest.mark.asyncio
     async def test_tv_bawah_open_app(self, mock_get_webos):
         mock_webos = AsyncMock()
@@ -528,7 +528,7 @@ class TestControlDevice:
 
         assert "netflix" in result.lower()
 
-    @patch("nova.tools.iot._get_tv_bawah_webos")
+    @patch("nova.tools.iot.get_tv_bawah_webos")
     @pytest.mark.asyncio
     async def test_tv_bawah_volume(self, mock_get_webos):
         mock_webos = AsyncMock()

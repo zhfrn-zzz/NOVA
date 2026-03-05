@@ -24,7 +24,7 @@ _tv_atas_webos = None
 _tv_bawah_webos = None
 
 
-def _get_tuya_driver():
+def get_tuya_driver():
     """Get or create the TuyaCloudDriver singleton."""
     global _tuya_driver
     if _tuya_driver is None:
@@ -33,7 +33,7 @@ def _get_tuya_driver():
     return _tuya_driver
 
 
-def _get_tv_atas_webos():
+def get_tv_atas_webos():
     """Get or create the LG WebOS driver for TV Atas."""
     global _tv_atas_webos
     if _tv_atas_webos is None:
@@ -46,7 +46,7 @@ def _get_tv_atas_webos():
     return _tv_atas_webos
 
 
-def _get_tv_bawah_webos():
+def get_tv_bawah_webos():
     """Get or create the LG WebOS driver for TV Bawah."""
     global _tv_bawah_webos
     if _tv_bawah_webos is None:
@@ -133,7 +133,7 @@ async def control_device(
 async def _handle_ac(action: str, value: str) -> str:
     """Handle AC commands."""
     try:
-        tuya = _get_tuya_driver()
+        tuya = get_tuya_driver()
     except Exception as e:
         return f"Gagal menghubungkan ke Tuya Cloud: {e}"
 
@@ -171,7 +171,7 @@ async def _handle_tv_atas(action: str, value: str) -> str:
     """Handle TV Atas commands — uses IR + WebOS."""
     try:
         if action == "on":
-            return await _tv_atas_ir("Power")
+            return await tv_atas_ir("Power")
         elif action == "off":
             return await _tv_atas_webos_cmd("power_off")
         elif action == "open_app":
@@ -187,10 +187,10 @@ async def _handle_tv_atas(action: str, value: str) -> str:
             return await _tv_atas_webos_volume_step("down")
         elif action in ("channel_up", "channel_down"):
             ir_cmd = _TV_IR_COMMANDS.get(action, action)
-            return await _tv_atas_ir(ir_cmd)
+            return await tv_atas_ir(ir_cmd)
         elif action in ("home", "back", "menu", "up", "down", "left", "right", "ok"):
             ir_cmd = _TV_IR_COMMANDS.get(action, action)
-            return await _tv_atas_ir(ir_cmd)
+            return await tv_atas_ir(ir_cmd)
         else:
             return f"Aksi TV '{action}' tidak dikenali."
     except Exception as e:
@@ -208,7 +208,7 @@ async def _handle_tv_bawah(action: str, value: str) -> str:
     if action in ("channel_up", "channel_down", "up", "down", "left", "right", "ok", "menu"):
         return f"Aksi '{action}' tidak tersedia untuk TV Bawah (tidak ada remote IR)."
 
-    webos = _get_tv_bawah_webos()
+    webos = get_tv_bawah_webos()
     if webos is None:
         return "IP TV Bawah belum dikonfigurasi (LG_TV_BAWAH_IP)."
 
@@ -243,10 +243,10 @@ async def _handle_tv_bawah(action: str, value: str) -> str:
 # ── TV Atas helpers ──────────────────────────────────────────────────
 
 
-async def _tv_atas_ir(command: str) -> str:
+async def tv_atas_ir(command: str) -> str:
     """Send IR command to TV Atas via Tuya."""
     try:
-        tuya = _get_tuya_driver()
+        tuya = get_tuya_driver()
         return await tuya.send_tv_ir_command(command)
     except Exception as e:
         logger.error("TV Atas IR error: %s", e)
@@ -255,7 +255,7 @@ async def _tv_atas_ir(command: str) -> str:
 
 async def _tv_atas_webos_cmd(command: str) -> str:
     """Send WebOS command to TV Atas, fall back to IR if WebOS fails."""
-    webos = _get_tv_atas_webos()
+    webos = get_tv_atas_webos()
     if webos is not None:
         try:
             if command == "power_off":
@@ -265,13 +265,13 @@ async def _tv_atas_webos_cmd(command: str) -> str:
 
     # Fallback to IR
     if command == "power_off":
-        return await _tv_atas_ir("Power")
+        return await tv_atas_ir("Power")
     return f"Perintah '{command}' gagal."
 
 
 async def _tv_atas_webos_app(app_name: str) -> str:
     """Launch app on TV Atas via WebOS."""
-    webos = _get_tv_atas_webos()
+    webos = get_tv_atas_webos()
     if webos is None:
         return "IP TV Atas belum dikonfigurasi (LG_TV_ATAS_IP)."
     try:
@@ -282,7 +282,7 @@ async def _tv_atas_webos_app(app_name: str) -> str:
 
 async def _tv_atas_webos_volume(level: int) -> str:
     """Set volume on TV Atas via WebOS, fall back to IR."""
-    webos = _get_tv_atas_webos()
+    webos = get_tv_atas_webos()
     if webos is not None:
         try:
             return await webos.set_volume(level)
@@ -295,7 +295,7 @@ async def _tv_atas_webos_volume(level: int) -> str:
 
 async def _tv_atas_webos_volume_step(direction: str) -> str:
     """Volume up/down on TV Atas via WebOS, fall back to IR."""
-    webos = _get_tv_atas_webos()
+    webos = get_tv_atas_webos()
     if webos is not None:
         try:
             if direction == "up":
@@ -307,7 +307,7 @@ async def _tv_atas_webos_volume_step(direction: str) -> str:
 
     # Fallback to IR
     ir_cmd = "Volume+" if direction == "up" else "Volume-"
-    return await _tv_atas_ir(ir_cmd)
+    return await tv_atas_ir(ir_cmd)
 
 
 # ── Value parsing helpers ────────────────────────────────────────────

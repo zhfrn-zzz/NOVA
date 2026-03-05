@@ -711,11 +711,13 @@ _FUNCTION_DECLARATIONS = [
     types.FunctionDeclaration(
         name="play_music",
         description=(
-            "Search and play a song on YouTube Music. Use when the user says "
-            "'puterin lagu', 'play song', 'putar musik', 'play music', "
-            "'nyalakan lagu', 'mainkan lagu', or mentions a song/artist to play. "
-            "Examples: 'puterin About You dari The 1975', 'play Bohemian Rhapsody', "
-            "'putar lagu Sheila On 7'. Build the query from song title and artist."
+            "Search and play a song. By default plays on YouTube Music in the browser. "
+            "Can also play on a TV via WebOS YouTube app by setting target. "
+            "Use when the user says 'puterin lagu', 'play song', 'putar musik', "
+            "'play music', 'nyalakan lagu', 'mainkan lagu', or mentions a song/artist "
+            "to play. If user says 'di TV Atas' or 'di TV', set target accordingly. "
+            "Examples: 'puterin About You dari The 1975 di TV Atas', 'play Bohemian Rhapsody'. "
+            "Build the query from song title and artist."
         ),
         parameters_json_schema={
             "type": "object",
@@ -726,6 +728,15 @@ _FUNCTION_DECLARATIONS = [
                         "Song search query combining title and artist, "
                         "e.g. 'About You The 1975', 'Bohemian Rhapsody Queen'."
                     ),
+                },
+                "target": {
+                    "type": "string",
+                    "description": (
+                        "Where to play: 'local' (laptop browser, default), "
+                        "'tv_atas' (TV Atas via WebOS YouTube), "
+                        "'tv_bawah' (TV Bawah via WebOS YouTube)."
+                    ),
+                    "enum": ["local", "tv_atas", "tv_bawah"],
                 },
             },
             "required": ["query"],

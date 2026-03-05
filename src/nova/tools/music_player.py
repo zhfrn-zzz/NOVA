@@ -1,9 +1,12 @@
 """Music playback tool — search and play songs via YouTube Music.
 
 Uses yt-dlp to resolve song queries to YouTube video IDs, then opens
-YouTube Music in the default browser for auto-playback. Playback control
-uses global media keys via pyautogui.
+YouTube Music in the default browser for auto-playback.  When *target*
+is a TV, the video is launched on the LG WebOS YouTube app instead.
+Playback control uses global media keys via pyautogui.
 """
+
+from __future__ import annotations
 
 import asyncio
 import logging
@@ -12,27 +15,12 @@ import webbrowser
 logger = logging.getLogger(__name__)
 
 _YTDLP_TIMEOUT = 10.0  # seconds
+_TV_BOOT_WAIT = 10.0  # seconds to wait after IR power-on
 
 
-async def play_music(query: str) -> str:
-    """Search for a song and play it on YouTube Music.
-
-    Uses yt-dlp to search YouTube for the query, extracts the video ID,
-    and opens the corresponding YouTube Music URL in the default browser.
-
-    Args:
-        query: Song search query, e.g. "About You The 1975".
-
-    Returns:
-        Status message with the song URL or an error.
-    """
-    if not query.strip():
-        return "Tidak ada lagu yang diminta."
-
-    logger.info("Music play request: %r", query)
-
+async def _search_youtube(query: str) -> str | None:
+    """Search YouTube via yt-dlp and return the first video ID, or *None*."""
     try:
-        # Run yt-dlp to search YouTube and get the video ID
         proc = await asyncio.wait_for(
             asyncio.create_subprocess_exec(
                 "yt-dlp",
@@ -51,10 +39,77 @@ async def play_music(query: str) -> str:
         if not video_id:
             err = stderr.decode("utf-8", errors="replace").strip()
             logger.warning("yt-dlp returned no video ID: %s", err)
-            return f"Tidak menemukan lagu untuk: {query}"
+            return None
 
-        # Take only the first ID if multiple lines
-        video_id = video_id.splitlines()[0].strip()
+        return video_id.splitlines()[0].strip()
+
+    except TimeoutError:
+        logger.warning("yt-dlp timed out after %.1fs", _YTDLP_TIMEOUT)
+        return None
+    except FileNotFoundError:
+        logger.error("yt-dlp not found in PATH")
+        return None
+
+
+async def _play_on_tv(query: str, target: str) -> str:
+    """Search YouTube, then launch the video on a WebOS TV."""
+    from nova.tools.iot import get_tv_atas_webos, get_tv_bawah_webos, tv_atas_ir
+
+    video_id = await _search_youtube(query)
+    if not video_id:
+        return f"Tidak menemukan lagu untuk: {query}"
+
+    if target == "tv_atas":
+        driver = get_tv_atas_webos()
+    else:
+        driver = get_tv_bawah_webos()
+
+    if driver is None:
+        return f"Driver WebOS untuk {target} belum dikonfigurasi (cek env vars)."
+
+    try:
+        return await driver.play_youtube(video_id)
+    except (ConnectionError, OSError):
+        if target != "tv_atas":
+            return (
+                "TV Bawah tidak bisa dinyalakan otomatis (tidak ada IR hub). "
+                "Nyalakan TV secara manual lalu coba lagi."
+            )
+        # Auto power-on TV Atas via IR, then retry
+        logger.info("TV Atas unreachable, sending IR power-on and waiting %.0fs", _TV_BOOT_WAIT)
+        await tv_atas_ir("Power")
+        await asyncio.sleep(_TV_BOOT_WAIT)
+        try:
+            return await driver.play_youtube(video_id)
+        except Exception as e:
+            logger.error("TV Atas still unreachable after power-on: %s", e)
+            return f"Gagal memutar di TV Atas setelah dinyalakan: {e}"
+
+
+async def play_music(query: str, target: str = "local") -> str:
+    """Search for a song and play it.
+
+    Args:
+        query: Song search query, e.g. "About You The 1975".
+        target: Where to play — ``"local"`` (browser), ``"tv_atas"``,
+                or ``"tv_bawah"`` (WebOS YouTube app).
+
+    Returns:
+        Status message with the song URL or an error.
+    """
+    if not query.strip():
+        return "Tidak ada lagu yang diminta."
+
+    logger.info("Music play request: %r (target=%s)", query, target)
+
+    if target in ("tv_atas", "tv_bawah"):
+        return await _play_on_tv(query, target)
+
+    # ── Local playback (browser) ─────────────────────────────────────
+    try:
+        video_id = await _search_youtube(query)
+        if not video_id:
+            return f"Tidak menemukan lagu untuk: {query}"
 
         url = f"https://music.youtube.com/watch?v={video_id}"
         logger.info("Opening YouTube Music: %s", url)
@@ -62,9 +117,6 @@ async def play_music(query: str) -> str:
 
         return f"Memutar lagu: {query} — {url}"
 
-    except TimeoutError:
-        logger.warning("yt-dlp timed out after %.1fs", _YTDLP_TIMEOUT)
-        return "Pencarian lagu terlalu lama, coba lagi."
     except FileNotFoundError:
         logger.error("yt-dlp not found in PATH")
         return "yt-dlp belum terinstall. Jalankan: pip install yt-dlp"

@@ -165,6 +165,39 @@ class LGWebOSDriver:
         logger.info("LG TV %s → powered off", self._name)
         return f"{self._name} dimatikan."
 
+    async def play_youtube(self, video_id: str) -> str:
+        """Launch YouTube and play a specific video.
+
+        Args:
+            video_id: YouTube video ID (e.g. 'dQw4w9WgXcQ').
+
+        Returns:
+            Status message.
+
+        Raises:
+            ConnectionError: If TV is unreachable.
+        """
+        await self._ensure_connected()
+        await self._client.launch_app_with_content_id(
+            LG_APPS["youtube"], video_id,
+        )
+        logger.info("LG TV %s → YouTube video %s", self._name, video_id)
+        return f"Memutar YouTube di {self._name} (video: {video_id})."
+
+    async def launch_spotify(self) -> str:
+        """Launch Spotify app on TV.
+
+        Returns:
+            Status message.
+
+        Raises:
+            ConnectionError: If TV is unreachable.
+        """
+        await self._ensure_connected()
+        await self._client.launch_app(LG_APPS["spotify"])
+        logger.info("LG TV %s → Spotify launched", self._name)
+        return f"Membuka Spotify di {self._name}."
+
     async def get_volume(self) -> int | None:
         """Get current volume level, or None if unavailable."""
         try:
