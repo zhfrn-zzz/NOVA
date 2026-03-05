@@ -168,7 +168,8 @@ class LGWebOSDriver:
     async def play_youtube(self, video_id: str) -> str:
         """Launch YouTube and play a specific video.
 
-        Uses contentTarget deep-link so YouTube TV auto-plays the video.
+        Uses contentId with ``v=`` prefix which YouTube TV app expects
+        for deep-linking directly to a video.
 
         Args:
             video_id: YouTube video ID (e.g. 'dQw4w9WgXcQ').
@@ -180,9 +181,8 @@ class LGWebOSDriver:
             ConnectionError: If TV is unreachable.
         """
         await self._ensure_connected()
-        await self._client.launch_app_with_params(
-            LG_APPS["youtube"],
-            {"contentTarget": f"https://www.youtube.com/tv#/watch/video/control?v={video_id}"},
+        await self._client.launch_app_with_content_id(
+            LG_APPS["youtube"], f"v={video_id}",
         )
         logger.info("LG TV %s → YouTube video %s", self._name, video_id)
         return f"Memutar YouTube di {self._name} (video: {video_id})."
