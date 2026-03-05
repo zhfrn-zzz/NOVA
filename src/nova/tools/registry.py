@@ -713,6 +713,11 @@ _FUNCTION_DECLARATIONS = [
         description=(
             "Search and play a song. By default plays on YouTube Music in the browser. "
             "Can also play on a TV via WebOS YouTube app by setting target. "
+            "IMPORTANT: TV playback ALWAYS uses YouTube — Spotify on TV cannot deep-link "
+            "to specific songs. If user asks to play a song on TV via Spotify, use this "
+            "tool with the TV target (it will play on YouTube) and explain that TV song "
+            "playback uses YouTube. To just open Spotify app on TV without a specific song, "
+            "use control_device with action='open_app' instead. "
             "Use when the user says 'puterin lagu', 'play song', 'putar musik', "
             "'play music', 'nyalakan lagu', 'mainkan lagu', or mentions a song/artist "
             "to play. If user says 'di TV Atas' or 'di TV', set target accordingly. "
