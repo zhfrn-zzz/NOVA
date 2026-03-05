@@ -105,12 +105,15 @@ async def _execute_tool_calls(tool_calls: list[dict]) -> list[dict]:
 
         logger.info("Groq tool call: %s(%s)", fn_name, fn_args)
 
+        from nova.tools.registry import get_tool_timeout
+
+        timeout = get_tool_timeout(fn_name)
         try:
             result = await asyncio.wait_for(
-                execute_tool(fn_name, fn_args), timeout=15.0,
+                execute_tool(fn_name, fn_args), timeout=timeout,
             )
         except TimeoutError:
-            result = f"Tool {fn_name} timed out after 15s"
+            result = f"Tool {fn_name} timed out after {timeout:.0f}s"
         except Exception as e:
             result = f"Tool {fn_name} error: {e}"
 

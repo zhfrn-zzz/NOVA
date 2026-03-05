@@ -294,14 +294,17 @@ class GeminiProvider(LLMProvider):
                     iteration + 1, fn_name, fn_args,
                 )
 
+                from nova.tools.registry import get_tool_timeout
+
+                timeout = get_tool_timeout(fn_name)
                 try:
                     result = await asyncio.wait_for(
                         execute_tool(fn_name, fn_args),
-                        timeout=15.0,
+                        timeout=timeout,
                     )
                     fn_response = {"result": result}
                 except TimeoutError:
-                    logger.warning("Tool %s timed out (>15s)", fn_name)
+                    logger.warning("Tool %s timed out (>%.0fs)", fn_name, timeout)
                     fn_response = {"error": f"{fn_name} timed out"}
                 except Exception as e:
                     logger.error("Tool %s failed: %s", fn_name, e)
@@ -435,14 +438,15 @@ class GeminiProvider(LLMProvider):
                 tool_call_count, fn_name, fn_args,
             )
 
-            from nova.tools.registry import execute_tool
+            from nova.tools.registry import execute_tool, get_tool_timeout
 
+            timeout = get_tool_timeout(fn_name)
             try:
                 result = await _asyncio.wait_for(
-                    execute_tool(fn_name, fn_args), timeout=15.0,
+                    execute_tool(fn_name, fn_args), timeout=timeout,
                 )
             except TimeoutError:
-                result = f"Tool {fn_name} timed out after 15s"
+                result = f"Tool {fn_name} timed out after {timeout:.0f}s"
             except Exception as e:
                 result = f"Tool {fn_name} error: {e}"
 

@@ -936,6 +936,17 @@ _TOOL_IMPLEMENTATIONS: dict[str, object] = {
     "control_device": iot.control_device,
 }
 
+# Tools that need more than the default 15 s execution timeout.
+TOOL_TIMEOUTS: dict[str, float] = {
+    "play_music": 30.0,      # TV auto-power-on: search + IR + 10s boot + reconnect
+    "control_device": 25.0,  # IoT commands may need IR + WebOS retry
+}
+
+
+def get_tool_timeout(fn_name: str) -> float:
+    """Return the timeout for a tool, defaulting to 15s."""
+    return TOOL_TIMEOUTS.get(fn_name, 15.0)
+
 
 def get_tool_declarations() -> list[types.Tool]:
     """Return the list of Tool objects for Gemini function calling.
