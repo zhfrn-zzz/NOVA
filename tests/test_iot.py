@@ -33,10 +33,8 @@ class TestTuyaCloudDriver:
         assert "dinyalakan" in result
         mock_cloud._tuyaplatform.assert_called_once()
         call_args = mock_cloud._tuyaplatform.call_args
-        assert "command" in call_args[0][0]  # uri
-        assert call_args[1]["action"] == "POST"
-        assert call_args[1]["post"]["code"] == "power"
-        assert call_args[1]["post"]["value"] == 1
+        assert "scenes/command" in call_args[0][0]  # combined endpoint
+        assert call_args[1]["post"]["power"] == "1"
 
     @patch("nova.iot.tuya_cloud.tinytuya.Cloud")
     @pytest.mark.asyncio
@@ -62,8 +60,8 @@ class TestTuyaCloudDriver:
 
         assert "24" in result
         call_args = mock_cloud._tuyaplatform.call_args
-        assert call_args[1]["post"]["code"] == "temp"
-        assert call_args[1]["post"]["value"] == 24
+        assert "scenes/command" in call_args[0][0]
+        assert call_args[1]["post"]["temp"] == "24"
 
     @patch("nova.iot.tuya_cloud.tinytuya.Cloud")
     @pytest.mark.asyncio
@@ -77,8 +75,8 @@ class TestTuyaCloudDriver:
 
         assert "cool" in result
         call_args = mock_cloud._tuyaplatform.call_args
-        assert call_args[1]["post"]["code"] == "mode"
-        assert call_args[1]["post"]["value"] == 0
+        assert "scenes/command" in call_args[0][0]
+        assert call_args[1]["post"]["mode"] == "0"
 
     @patch("nova.iot.tuya_cloud.tinytuya.Cloud")
     @pytest.mark.asyncio
@@ -116,7 +114,7 @@ class TestTuyaCloudDriver:
 
         assert "dinyalakan" in result
         assert "24" in result
-        assert mock_cloud._tuyaplatform.call_count == 2
+        assert mock_cloud._tuyaplatform.call_count == 1
 
     @patch("nova.iot.tuya_cloud.tinytuya.Cloud")
     @pytest.mark.asyncio
@@ -334,7 +332,7 @@ class TestControlDevice:
         from nova.tools.iot import control_device
         await control_device("ac", "set_temp", "24")
 
-        mock_driver.send_ac_command.assert_awaited_once_with(temp=24)
+        mock_driver.send_ac_command.assert_awaited_once_with(power=True, temp=24)
 
     @pytest.mark.asyncio
     async def test_ac_set_temp_out_of_range(self):
@@ -357,7 +355,7 @@ class TestControlDevice:
 
         from nova.tools.iot import control_device
         await control_device("ac", "set_mode", "0")
-        mock_driver.send_ac_command.assert_awaited_once_with(mode=0)
+        mock_driver.send_ac_command.assert_awaited_once_with(power=True, mode=0)
 
     @patch("nova.tools.iot._get_tuya_driver")
     @pytest.mark.asyncio
@@ -368,7 +366,7 @@ class TestControlDevice:
 
         from nova.tools.iot import control_device
         await control_device("ac", "set_mode", "dingin")
-        mock_driver.send_ac_command.assert_awaited_once_with(mode=0)
+        mock_driver.send_ac_command.assert_awaited_once_with(power=True, mode=0)
 
     @pytest.mark.asyncio
     async def test_ac_set_mode_invalid(self):
@@ -385,7 +383,7 @@ class TestControlDevice:
 
         from nova.tools.iot import control_device
         await control_device("ac", "set_fan", "2")
-        mock_driver.send_ac_command.assert_awaited_once_with(fan=2)
+        mock_driver.send_ac_command.assert_awaited_once_with(power=True, fan=2)
 
     @pytest.mark.asyncio
     async def test_ac_invalid_action(self):

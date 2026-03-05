@@ -66,6 +66,14 @@ class TuyaCloudDriver:
         self._access_key = access_key or os.environ.get("TUYA_ACCESS_KEY", "")
         self._region = region or os.environ.get("TUYA_REGION", "eu")
         self._cloud: tinytuya.Cloud | None = None
+        # Tracked AC state for combined IR signals (scenes/command endpoint).
+        # Each IR blast carries the full state, so we cache last-known values.
+        self._ac_state: dict[str, str] = {
+            "power": "1",
+            "mode": "0",   # cool
+            "temp": "24",
+            "wind": "0",   # auto
+        }
 
     def _get_cloud(self) -> tinytuya.Cloud:
         """Lazy-init the tinytuya Cloud client."""
@@ -109,53 +117,46 @@ class TuyaCloudDriver:
     ) -> str:
         """Send command to AC via IR hub (synchronous).
 
-        Uses the Tuya AC-specific endpoint:
-        POST /v2.0/infrareds/{infrared_id}/air-conditioners/{remote_id}/command
-        with body {"code": "power|temp|mode|wind", "value": <int>}.
+        Uses the Tuya combined AC endpoint (scenes/command) which sends a
+        SINGLE IR signal containing the full AC state. This matches how
+        physical AC remotes work — each IR blast carries power+temp+mode+fan.
+        The SmartLife app uses this same endpoint.
         """
-        results = []
-        uri = f"infrareds/{_IR_HUB_ID}/air-conditioners/{_AC_REMOTE_ID}/command"
-
+        # Update tracked state with any new values
         if power is not None:
-            resp = self._post(uri, {"code": "power", "value": 1 if power else 0})
-            success = resp.get("success", False) if isinstance(resp, dict) else False
-            if success:
-                results.append("dinyalakan" if power else "dimatikan")
-            else:
-                logger.warning("AC power command failed: %s", resp)
-                return f"Gagal {'menyalakan' if power else 'mematikan'} AC."
-
+            self._ac_state["power"] = "1" if power else "0"
         if temp is not None:
-            resp = self._post(uri, {"code": "temp", "value": temp})
-            success = resp.get("success", False) if isinstance(resp, dict) else False
-            if success:
-                results.append(f"suhu {temp}°C")
-            else:
-                logger.warning("AC temp command failed: %s", resp)
-                return f"Gagal mengatur suhu AC ke {temp}°C."
-
+            self._ac_state["temp"] = str(temp)
         if mode is not None:
-            resp = self._post(uri, {"code": "mode", "value": mode})
-            success = resp.get("success", False) if isinstance(resp, dict) else False
-            if success:
-                mode_name = AC_MODES.get(mode, str(mode))
-                results.append(f"mode {mode_name}")
-            else:
-                logger.warning("AC mode command failed: %s", resp)
-                return "Gagal mengatur mode AC."
-
+            self._ac_state["mode"] = str(mode)
         if fan is not None:
-            resp = self._post(uri, {"code": "wind", "value": fan})
-            success = resp.get("success", False) if isinstance(resp, dict) else False
-            if success:
-                fan_name = AC_FAN_SPEEDS.get(fan, str(fan))
-                results.append(f"kipas {fan_name}")
-            else:
-                logger.warning("AC fan command failed: %s", resp)
-                return "Gagal mengatur kecepatan kipas AC."
+            self._ac_state["wind"] = str(fan)
 
-        if not results:
+        if power is None and temp is None and mode is None and fan is None:
             return "Tidak ada perintah AC yang diberikan."
+
+        uri = f"infrareds/{_IR_HUB_ID}/air-conditioners/{_AC_REMOTE_ID}/scenes/command"
+        payload = self._ac_state.copy()
+        logger.debug("AC scenes/command payload: %s", payload)
+        resp = self._post(uri, payload)
+        success = resp.get("success", False) if isinstance(resp, dict) else False
+
+        if not success:
+            logger.warning("AC combined command failed: %s", resp)
+            return f"Gagal mengontrol AC: {resp}"
+
+        # Build human-readable result
+        results = []
+        if power is not None:
+            results.append("dinyalakan" if power else "dimatikan")
+        if temp is not None:
+            results.append(f"suhu {temp}°C")
+        if mode is not None:
+            mode_name = AC_MODES.get(mode, str(mode))
+            results.append(f"mode {mode_name}")
+        if fan is not None:
+            fan_name = AC_FAN_SPEEDS.get(fan, str(fan))
+            results.append(f"kipas {fan_name}")
 
         return "AC " + ", ".join(results) + "."
 

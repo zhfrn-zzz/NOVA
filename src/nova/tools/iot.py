@@ -146,17 +146,17 @@ async def _handle_ac(action: str, value: str) -> str:
             temp = _parse_int(value, 16, 30)
             if temp is None:
                 return "Suhu AC harus antara 16-30 derajat."
-            return await tuya.send_ac_command(temp=temp)
+            return await tuya.send_ac_command(power=True, temp=temp)
         elif action == "set_mode":
             mode = _resolve_ac_mode(value)
             if mode is None:
                 return "Mode AC tidak valid. Pilihan: 0=dingin, 1=panas, 2=auto, 3=kipas, 4=kering."
-            return await tuya.send_ac_command(mode=mode)
+            return await tuya.send_ac_command(power=True, mode=mode)
         elif action == "set_fan":
             fan = _resolve_ac_fan(value)
             if fan is None:
                 return "Kecepatan kipas tidak valid. Pilihan: 0=auto, 1=pelan, 2=sedang, 3=kencang."
-            return await tuya.send_ac_command(fan=fan)
+            return await tuya.send_ac_command(power=True, fan=fan)
         else:
             return (
                 f"Aksi AC '{action}' tidak dikenali. "
