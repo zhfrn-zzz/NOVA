@@ -103,6 +103,10 @@ nova/
 │       │       ├── google_cloud_tts.py  # Google Cloud TTS (Chirp 3 HD, primary)
 │       │       ├── edge_tts_provider.py
 │       │       └── cloudflare_tts.py
+│       ├── deeptalk/
+│       │   ├── __init__.py
+│       │   ├── session.py        # DeepTalk continuous conversation session
+│       │   └── barge_in.py       # Barge-in detection (Silero VAD ONNX)
 │       ├── remote/
 │       │   ├── __init__.py
 │       │   └── server.py         # WebSocket server for remote agent connections
@@ -159,7 +163,8 @@ nova/
 │   ├── test_sound_loader.py         # Phase 4: Custom sound loader
 │   ├── test_weather.py             # Phase 2: Weather tool
 │   ├── test_tts_cache.py           # Phase 5: TTS audio cache
-│   └── test_iot.py                 # Phase 6: IoT device control
+│   ├── test_iot.py                 # Phase 6: IoT device control
+│   └── test_deeptalk.py            # Phase 8: DeepTalk continuous conversation
 ├── nova-agent/
 │   ├── nova_agent.py             # Windows system tray agent (pystray + WebSocket)
 │   ├── requirements.txt          # Agent-only dependencies
@@ -227,6 +232,7 @@ nova/
 - [x] Task 50: IoT integration Phase 1 — AC control via Tuya Cloud IR, TV Atas (IR+WebOS), TV Bawah (WebOS only), control_device tool, smart dispatch (Phase 6)
 - [x] Task 51: TV music playback — play_music target param for TV Atas/Bawah via WebOS YouTube deep-link, auto IR power-on (Phase 6)
 - [x] Task 52: Remote agent — WebSocket server + standalone Windows agent for remote PC control, auto-route system tools to connected agent (Phase 7)
+- [x] Task 53: DeepTalk mode — continuous conversation without wake word, barge-in with Silero VAD ONNX, stoppable TTS, voice/keyboard entry/exit (Phase 8)
 
 ## Important Notes
 

@@ -88,6 +88,13 @@ class NovaConfig(BaseSettings):
     remote_agent_port: int = 8765
     remote_agent_token: str = ""  # Shared secret for auth; leave empty to disable auth
 
+    # DeepTalk (continuous conversation mode)
+    deeptalk_silence_duration: float = 1.5  # Faster cutoff for conversational pace
+    deeptalk_vad_threshold: float = 0.5  # Barge-in VAD threshold (strict, avoids TTS echo)
+    deeptalk_capture_vad_threshold: float = 0.15  # Capture VAD threshold (permissive)
+    deeptalk_min_speech_duration: float = 0.3  # Seconds of speech to confirm detection
+    deeptalk_vad_model_path: str = "models/silero_vad.onnx"
+
     # Custom sounds
     custom_sounds_enabled: bool = True
     custom_sounds_dir: str = "sounds"  # Relative to project root, or absolute path

@@ -314,6 +314,8 @@ class Orchestrator:
             total = time.perf_counter() - start
 
             if not full_text:
+                if self._streaming_tts.stopped:
+                    return "", 0.0
                 return None
 
             logger.info(
@@ -539,6 +541,54 @@ class Orchestrator:
             if msg["role"] == "user":
                 return msg["content"]
         return None
+
+    def stop_speaking(self) -> None:
+        """Immediately stop TTS playback (thread-safe, for barge-in)."""
+        self._streaming_tts.stop()
+
+    def reset_speaking(self) -> None:
+        """Clear TTS stop state before a new interaction."""
+        self._streaming_tts.reset_stop()
+
+    async def capture_and_transcribe(self) -> str | None:
+        """Capture audio and transcribe without LLM/TTS processing.
+
+        Used by the main loop to inspect the transcript before deciding
+        whether to enter DeepTalk mode or handle normally.
+
+        Returns:
+            Transcript string, None for empty audio, or a sentinel string
+            (``__AUDIO_DEVICE_ERROR__``, ``__STT_FAILED__``) on failure.
+        """
+        self._interaction_count += 1
+        interaction_id = self._interaction_count
+
+        try:
+            audio_capture = self._get_audio_capture()
+            wav_bytes = await audio_capture.capture()
+        except OSError as e:
+            logger.error("[#%d] Audio device error: %s", interaction_id, e)
+            return "__AUDIO_DEVICE_ERROR__"
+        except Exception as e:
+            logger.exception("[#%d] Audio capture error: %s", interaction_id, e)
+            return "__AUDIO_DEVICE_ERROR__"
+
+        if len(wav_bytes) <= 44:
+            return None
+
+        try:
+            transcript = await self._stt_router.execute("transcribe", wav_bytes)
+        except AllProvidersFailedError:
+            logger.error("[#%d] All STT providers failed", interaction_id)
+            return "__STT_FAILED__"
+        except Exception:
+            logger.exception("[#%d] STT error", interaction_id)
+            return "__STT_FAILED__"
+
+        if not transcript or not transcript.strip():
+            return None
+
+        return transcript.strip()
 
     def clear_context(self) -> None:
         """Reset the conversation history."""

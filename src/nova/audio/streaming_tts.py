@@ -11,11 +11,14 @@ This dramatically reduces "time to first audio" from 8+ seconds to <2 seconds.
 
 import asyncio
 import logging
+import os
 import re
+import tempfile
+import threading
 import time
 from collections.abc import AsyncIterator
 
-from nova.audio.playback import play_audio
+from nova.audio.playback import _find_player
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +136,101 @@ class StreamingTTSPlayer:
     - Consumer: plays audio chunks back-to-back from the queue
 
     While the consumer plays sentence N, the producer synthesizes sentence N+1.
+
+    Supports mid-stream interruption via ``stop()`` for barge-in during
+    DeepTalk mode.  The stop flag is a ``threading.Event`` so it can be
+    safely set from background threads (e.g. the barge-in detector).
     """
+
+    def __init__(self) -> None:
+        self._stop_flag = threading.Event()
+        self._playback_process: asyncio.subprocess.Process | None = None
+
+    # ── Stop / reset API (thread-safe) ────────────────────────────────
+
+    def stop(self) -> None:
+        """Immediately stop TTS playback (thread-safe, for barge-in)."""
+        self._stop_flag.set()
+        proc = self._playback_process
+        if proc is not None:
+            try:
+                proc.terminate()
+            except (ProcessLookupError, OSError):
+                pass
+
+    def reset_stop(self) -> None:
+        """Clear the stop state before a new interaction."""
+        self._stop_flag.clear()
+        self._playback_process = None
+
+    @property
+    def stopped(self) -> bool:
+        """Whether a stop has been requested."""
+        return self._stop_flag.is_set()
+
+    # ── Stoppable playback ────────────────────────────────────────────
+
+    async def _play_with_tracking(self, audio_bytes: bytes) -> bool:
+        """Play audio bytes while tracking the subprocess for interruption.
+
+        Returns True if playback completed, False if stopped.
+        """
+        if not audio_bytes or self._stop_flag.is_set():
+            return False
+
+        player_name, cmd = _find_player()
+        tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+        try:
+            tmp.write(audio_bytes)
+            tmp.close()
+
+            process = await asyncio.create_subprocess_exec(
+                *(cmd + [tmp.name]),
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            self._playback_process = process
+
+            wait_task = asyncio.create_task(process.wait())
+            try:
+                while not wait_task.done():
+                    if self._stop_flag.is_set():
+                        try:
+                            process.terminate()
+                        except (ProcessLookupError, OSError):
+                            pass
+                        try:
+                            await asyncio.wait_for(process.wait(), timeout=0.5)
+                        except (asyncio.TimeoutError, ProcessLookupError):
+                            try:
+                                process.kill()
+                            except (ProcessLookupError, OSError):
+                                pass
+                        return False
+                    await asyncio.sleep(0.05)
+            finally:
+                if not wait_task.done():
+                    wait_task.cancel()
+                    try:
+                        await wait_task
+                    except asyncio.CancelledError:
+                        pass
+
+            if process.returncode and process.returncode != 0:
+                logger.warning(
+                    "Audio player %s exited with code %d",
+                    player_name, process.returncode,
+                )
+            return True
+        except Exception:
+            logger.warning("Stoppable playback error", exc_info=True)
+            return False
+        finally:
+            self._playback_process = None
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
 
     async def synthesize_and_play(
         self,
@@ -167,13 +264,15 @@ class StreamingTTSPlayer:
         )
 
         tts_start = time.perf_counter()
-        audio_queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=2)
+        audio_queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=0)
         first_audio_time: float | None = None
 
         async def producer() -> None:
             """Synthesize sentences and push audio to the queue."""
             nonlocal first_audio_time
             for i, sentence in enumerate(sentences):
+                if self._stop_flag.is_set():
+                    break
                 try:
                     audio = await tts_router.execute(
                         "synthesize", _strip_markdown(sentence), language,
@@ -186,25 +285,20 @@ class StreamingTTSPlayer:
                         "Streaming TTS: failed to synthesize sentence %d: %r",
                         i, sentence[:50], exc_info=True,
                     )
-                    # Skip this sentence, continue with next
-            # Signal end of stream
             await audio_queue.put(None)
 
         async def consumer() -> None:
             """Play audio chunks from the queue back-to-back."""
             while True:
+                if self._stop_flag.is_set():
+                    break
                 audio = await audio_queue.get()
                 if audio is None:
                     break
-                try:
-                    await play_audio(audio)
-                except Exception:
-                    logger.warning(
-                        "Streaming TTS: playback error", exc_info=True,
-                    )
+                completed = await self._play_with_tracking(audio)
+                if not completed:
+                    break
 
-        # Run producer and consumer concurrently.
-        # Producer fills the queue while consumer drains it.
         await asyncio.gather(producer(), consumer())
 
         total_time = time.perf_counter() - tts_start
@@ -224,6 +318,8 @@ class StreamingTTSPlayer:
         language: str,
     ) -> float:
         """Fast path for single-sentence responses (no queue overhead)."""
+        if self._stop_flag.is_set():
+            return 0.0
         start = time.perf_counter()
         try:
             audio = await tts_router.execute(
@@ -234,7 +330,7 @@ class StreamingTTSPlayer:
                 "TTS single sentence: %.2fs (%d bytes)",
                 synth_time, len(audio),
             )
-            await play_audio(audio)
+            await self._play_with_tracking(audio)
             return synth_time
         except Exception:
             logger.error(
@@ -273,8 +369,9 @@ class StreamingTTSPlayer:
         from nova.providers.tts.edge_tts_provider import detect_language
 
         tts_start = time.perf_counter()
-        # Queue carries sentences (text), not audio — the consumer synthesizes
-        sentence_queue: asyncio.Queue[str | None] = asyncio.Queue(maxsize=4)
+        # Queue carries sentences (text), not audio — the consumer synthesizes.
+        # Unbounded so the producer never blocks when the consumer stops early.
+        sentence_queue: asyncio.Queue[str | None] = asyncio.Queue(maxsize=0)
         all_sentences: list[str] = []
         first_audio_time: float | None = None
         detected_lang = language
@@ -285,9 +382,11 @@ class StreamingTTSPlayer:
             i = 0
             try:
                 async for sentence in sentence_stream:
+                    if self._stop_flag.is_set():
+                        all_sentences.append(sentence)
+                        break
                     all_sentences.append(sentence)
 
-                    # Auto-detect language from the first sentence
                     if detected_lang == "auto" and i == 0:
                         detected_lang = detect_language(sentence)
                         logger.debug(
@@ -297,8 +396,13 @@ class StreamingTTSPlayer:
 
                     await sentence_queue.put(sentence)
                     i += 1
+            except asyncio.CancelledError:
+                logger.debug("LLM→TTS producer cancelled (barge-in)")
             finally:
-                await sentence_queue.put(None)
+                try:
+                    sentence_queue.put_nowait(None)
+                except asyncio.QueueFull:
+                    pass
 
         async def _synthesize(text: str) -> bytes | None:
             """Synthesize a single sentence, returning None on failure."""
@@ -320,13 +424,19 @@ class StreamingTTSPlayer:
             done = False
 
             while not done:
-                # Get audio: from prefetch task or synthesize now
+                if self._stop_flag.is_set():
+                    if prefetch_task:
+                        prefetch_task.cancel()
+                    break
+
                 if prefetch_task is not None:
                     audio = await prefetch_task
                     prefetch_task = None
                 else:
                     sentence = await sentence_queue.get()
                     if sentence is None:
+                        break
+                    if self._stop_flag.is_set():
                         break
                     audio = await _synthesize(sentence)
                     if audio is not None and first_audio_time is None:
@@ -335,12 +445,11 @@ class StreamingTTSPlayer:
                 if audio is None:
                     continue
 
-                # Before playing, prefetch next sentence's audio
                 if not sentence_queue.empty():
                     try:
                         next_item = sentence_queue.get_nowait()
                         if next_item is None:
-                            done = True  # exit after playing current audio
+                            done = True
                         else:
                             prefetch_task = asyncio.create_task(
                                 _synthesize(next_item),
@@ -348,15 +457,31 @@ class StreamingTTSPlayer:
                     except asyncio.QueueEmpty:
                         pass
 
-                # Play current audio — prefetch runs concurrently
-                try:
-                    await play_audio(audio)
-                except Exception:
-                    logger.warning(
-                        "LLM→TTS stream: playback error", exc_info=True,
-                    )
+                completed = await self._play_with_tracking(audio)
+                if not completed:
+                    if prefetch_task:
+                        prefetch_task.cancel()
+                    break
 
-        await asyncio.gather(producer(), consumer())
+        producer_task = asyncio.create_task(producer())
+        consumer_task = asyncio.create_task(consumer())
+
+        await consumer_task
+
+        if not producer_task.done():
+            producer_task.cancel()
+
+        try:
+            await producer_task
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            if not all_sentences:
+                raise
+            logger.warning(
+                "LLM→TTS producer error (partial response available)",
+                exc_info=True,
+            )
 
         total_time = time.perf_counter() - tts_start
         full_text = " ".join(all_sentences)

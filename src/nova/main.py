@@ -8,9 +8,12 @@ import sys
 from rich.console import Console
 
 from nova.config import get_config
+from nova.deeptalk.session import is_deeptalk_trigger
 from nova.utils.logger import setup_logging
 
 console = Console()
+
+_barge_in_detector = None  # Singleton, lazy-initialized
 
 
 def _parse_args() -> argparse.Namespace:
@@ -316,6 +319,34 @@ async def _check_voice_notifications(orchestrator, detector, config) -> bool:
     return False
 
 
+def _get_barge_in_detector():
+    """Lazy-initialize the barge-in detector (loads Silero VAD ONNX)."""
+    global _barge_in_detector
+    if _barge_in_detector is None:
+        from nova.deeptalk.barge_in import BargeInDetector
+
+        _barge_in_detector = BargeInDetector()
+    return _barge_in_detector
+
+
+async def _run_deeptalk(orchestrator) -> None:
+    """Run a DeepTalk continuous conversation session.
+
+    Blocks until the user says an exit phrase or the session errors out.
+    """
+    from nova.deeptalk.session import DeepTalkSession
+
+    try:
+        detector = _get_barge_in_detector()
+    except Exception:
+        logging.getLogger(__name__).exception("Failed to initialize barge-in detector")
+        console.print("[red]Gagal memuat model VAD untuk DeepTalk.[/]\n")
+        return
+
+    session = DeepTalkSession(orchestrator, detector)
+    await session.start()
+
+
 async def _text_mode(orchestrator) -> None:
     """Run the text-only interactive loop."""
     orchestrator._text_only = True
@@ -383,6 +414,11 @@ async def _voice_mode(orchestrator) -> None:
             if stripped in ("exit", "quit", "bye"):
                 break
 
+            # DeepTalk keyboard entry
+            if stripped in ("d", "deeptalk"):
+                await _run_deeptalk(orchestrator)
+                continue
+
             # If they typed actual text, use text mode for it
             if user_input.strip():
                 try:
@@ -405,17 +441,16 @@ async def _voice_mode(orchestrator) -> None:
             console.print("[bold yellow]🎤 Listening...[/]")
 
             try:
-                response = await orchestrator.handle_voice_interaction()
+                transcript = await orchestrator.capture_and_transcribe()
 
-                # Handle sentinel values from orchestrator
-                if response == "__AUDIO_DEVICE_ERROR__":
+                if transcript == "__AUDIO_DEVICE_ERROR__":
                     console.print(
                         "[red]Mikrofon tidak ditemukan, beralih ke mode teks.[/]\n"
                     )
                     text_fallback = True
                     continue
 
-                if response == "__STT_FAILED__":
+                if transcript == "__STT_FAILED__":
                     console.print(
                         "[yellow]Maaf, saya tidak bisa mendengar sekarang. "
                         "Coba ketik saja.[/]\n"
@@ -423,16 +458,19 @@ async def _voice_mode(orchestrator) -> None:
                     text_fallback = True
                     continue
 
-                if response is None:
+                if not transcript:
                     console.print(
                         "[dim]Saya tidak mendengar apa-apa, bisa diulang?[/]\n"
                     )
                     continue
 
-                # Print what was heard and the response
-                transcript = orchestrator.last_transcript
-                if transcript:
-                    console.print(f"[bold white]You:[/] {transcript}")
+                # Check for DeepTalk voice trigger
+                if is_deeptalk_trigger(transcript):
+                    await _run_deeptalk(orchestrator)
+                    continue
+
+                response = await orchestrator.handle_interaction(transcript)
+                console.print(f"[bold white]You:[/] {transcript}")
                 console.print(f"[bold cyan]Nova:[/] {response}\n")
 
             except KeyboardInterrupt:
@@ -497,9 +535,10 @@ async def _wake_word_mode(orchestrator, force_hotkey: bool = False) -> None:
 
     # Run a background task for keyboard exit input
     exit_event = asyncio.Event()
+    deeptalk_event = asyncio.Event()
 
     async def _exit_listener():
-        """Listen for typed 'exit' commands in background."""
+        """Listen for typed 'exit' / 'deeptalk' commands in background."""
         while not exit_event.is_set():
             try:
                 user_input = await loop.run_in_executor(
@@ -509,6 +548,9 @@ async def _wake_word_mode(orchestrator, force_hotkey: bool = False) -> None:
                 if stripped in ("exit", "quit", "bye"):
                     exit_event.set()
                     return
+                if stripped in ("d", "deeptalk"):
+                    deeptalk_event.set()
+                    continue
                 # If they typed actual text, process it
                 if user_input.strip():
                     try:
@@ -519,15 +561,34 @@ async def _wake_word_mode(orchestrator, force_hotkey: bool = False) -> None:
                     except Exception:
                         logging.getLogger(__name__).exception("Error")
                         console.print("[red]Terjadi kesalahan.[/]\n")
-            except EOFError:
+            except (EOFError, OSError):
                 exit_event.set()
                 return
+            except Exception:
+                logging.getLogger(__name__).debug(
+                    "exit_listener error", exc_info=True,
+                )
+                await asyncio.sleep(0.5)
 
     exit_task = asyncio.create_task(_exit_listener())
 
     activation_task = None
     try:
         while not exit_event.is_set():
+            # --- DeepTalk keyboard trigger ---
+            if deeptalk_event.is_set():
+                deeptalk_event.clear()
+                detector.stop()
+                try:
+                    await _run_deeptalk(orchestrator)
+                except Exception:
+                    logging.getLogger(__name__).exception(
+                        "DeepTalk session error (keyboard)"
+                    )
+                detector.start(loop)
+                activation_task = None
+                continue
+
             # --- Check heartbeat notification queue ---
             handled = await _check_voice_notifications(
                 orchestrator, detector, config,
@@ -546,13 +607,9 @@ async def _wake_word_mode(orchestrator, force_hotkey: bool = False) -> None:
                 timeout=5,
             )
 
-            # Timeout — no wake word, no exit. Loop back to check queue.
-            # DON'T cancel activation_task — keep it running so wake word
-            # detection isn't lost.
             if not done:
                 continue
 
-            # Cancel pending tasks
             for task in pending:
                 if task is activation_task:
                     task.cancel()
@@ -565,13 +622,14 @@ async def _wake_word_mode(orchestrator, force_hotkey: bool = False) -> None:
                 break
 
             if activation_task in done:
-                # Hotkey was pressed — capture and process voice
                 console.print("[bold yellow]🎤 Listening...[/]")
+                _logger = logging.getLogger(__name__)
 
                 try:
-                    response = await orchestrator.handle_voice_interaction()
+                    transcript = await orchestrator.capture_and_transcribe()
+                    _logger.debug("Wake word transcript: %r", transcript)
 
-                    if response == "__AUDIO_DEVICE_ERROR__":
+                    if transcript == "__AUDIO_DEVICE_ERROR__":
                         console.print(
                             "[red]Mikrofon tidak ditemukan, "
                             "beralih ke mode teks.[/]\n"
@@ -579,23 +637,42 @@ async def _wake_word_mode(orchestrator, force_hotkey: bool = False) -> None:
                         text_fallback = True
                         break
 
-                    if response == "__STT_FAILED__":
+                    if transcript == "__STT_FAILED__":
                         console.print(
                             "[yellow]Maaf, saya tidak bisa "
                             "mendengar sekarang.[/]\n"
                         )
                         continue
 
-                    if response is None:
+                    if not transcript:
                         console.print(
                             "[dim]Saya tidak mendengar apa-apa, "
                             "bisa diulang?[/]\n"
                         )
                         continue
 
-                    transcript = orchestrator.last_transcript
-                    if transcript:
-                        console.print(f"[bold white]You:[/] {transcript}")
+                    # Check for DeepTalk voice trigger
+                    if is_deeptalk_trigger(transcript):
+                        _logger.info(
+                            "DeepTalk trigger: %r", transcript,
+                        )
+                        sys.stderr.flush()
+                        _logger.info("Stopping wake word detector...")
+                        sys.stderr.flush()
+                        detector.stop()
+                        _logger.info("Detector stopped, entering DeepTalk")
+                        sys.stderr.flush()
+                        try:
+                            await _run_deeptalk(orchestrator)
+                        except Exception:
+                            _logger.exception("DeepTalk session error")
+                        _logger.info("DeepTalk ended, restarting detector")
+                        detector.start(loop)
+                        activation_task = None
+                        continue
+
+                    response = await orchestrator.handle_interaction(transcript)
+                    console.print(f"[bold white]You:[/] {transcript}")
                     console.print(f"[bold cyan]Nova:[/] {response}\n")
 
                 except Exception:
@@ -674,6 +751,8 @@ async def _async_main() -> None:
             await _wake_word_mode(orchestrator, force_hotkey=True)
         else:
             await _wake_word_mode(orchestrator)
+    except Exception:
+        logging.getLogger(__name__).exception("NOVA terminated unexpectedly")
     finally:
         if config.remote_agent_enabled:
             try:
@@ -682,8 +761,9 @@ async def _async_main() -> None:
                 await stop_remote_server()
             except Exception:
                 pass
-
-    console.print("\n[bold green]Sampai jumpa![/] (Goodbye!)")
+        console.print("\n[bold green]Sampai jumpa![/] (Goodbye!)")
+        sys.stdout.flush()
+        sys.stderr.flush()
 
 
 def main() -> None:
@@ -692,6 +772,9 @@ def main() -> None:
         asyncio.run(_async_main())
     except KeyboardInterrupt:
         console.print("\n[bold green]Sampai jumpa![/] (Goodbye!)")
+    except Exception:
+        logging.getLogger(__name__).exception("NOVA crashed")
+        console.print("\n[red]NOVA crashed unexpectedly. Check logs.[/]")
 
 
 if __name__ == "__main__":

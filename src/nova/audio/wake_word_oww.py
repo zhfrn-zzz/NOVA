@@ -198,18 +198,41 @@ class OpenWakeWordDetector:
             logger.debug("Could not play activation beep", exc_info=True)
 
     def stop(self) -> None:
-        """Stop the wake word listener and release resources."""
+        """Stop the wake word listener and release resources.
+
+        Uses a two-phase shutdown to avoid PortAudio race conditions
+        on Windows: first signal the reader thread to exit, wait for it
+        to leave stream.read(), then close the stream safely.
+        """
         self._running = False
+
+        # Phase 1: let reader thread exit naturally (stream.read blocks
+        # for at most one frame = 80 ms at 16 kHz / 1280 samples).
+        if self._thread is not None:
+            self._thread.join(timeout=0.2)
+
+        # Phase 2: if the thread is still alive (stream.read stuck),
+        # force-stop the stream so stream.read raises and the thread exits.
+        if self._thread is not None and self._thread.is_alive():
+            if self._stream is not None:
+                try:
+                    self._stream.stop()
+                except Exception:
+                    pass
+            self._thread.join(timeout=2.0)
+
+        self._thread = None
+
+        # Phase 3: close the stream (thread is no longer reading).
         if self._stream is not None:
             try:
-                self._stream.stop()
+                if self._stream.active:
+                    self._stream.stop()
                 self._stream.close()
             except Exception:
-                logger.debug("Error stopping audio stream", exc_info=True)
+                logger.debug("Error closing audio stream", exc_info=True)
             self._stream = None
-        if self._thread is not None:
-            self._thread.join(timeout=2.0)
-            self._thread = None
+
         self._model = None
         logger.info("OpenWakeWord detector stopped")
 

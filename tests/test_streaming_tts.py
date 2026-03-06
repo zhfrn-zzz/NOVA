@@ -109,7 +109,9 @@ class TestStreamingTTSPlayer:
         mock_router = AsyncMock()
         mock_router.execute.return_value = b"fake-audio-bytes"
 
-        with patch("nova.audio.streaming_tts.play_audio", new_callable=AsyncMock):
+        with patch.object(
+            player, "_play_with_tracking", new_callable=AsyncMock, return_value=True,
+        ):
             result = await player.synthesize_and_play(
                 "Halo saya Nova.", mock_router, "id",
             )
@@ -126,7 +128,9 @@ class TestStreamingTTSPlayer:
         mock_router.execute.return_value = b"fake-audio-bytes"
 
         # Use long sentences (>= 40 chars each) so they don't merge
-        with patch("nova.audio.streaming_tts.play_audio", new_callable=AsyncMock):
+        with patch.object(
+            player, "_play_with_tracking", new_callable=AsyncMock, return_value=True,
+        ):
             result = await player.synthesize_and_play(
                 "Baterai laptop Anda saat ini sedang terisi penuh. "
                 "Sedang mengisi daya melalui kabel USB yang terhubung.",
@@ -134,22 +138,20 @@ class TestStreamingTTSPlayer:
             )
 
         assert result > 0.0
-        # Both sentences are >= 40 chars, so they stay separate → 2 TTS calls
         assert mock_router.execute.call_count == 2
 
     @pytest.mark.asyncio
     async def test_synthesis_failure_skips_sentence(self):
         player = StreamingTTSPlayer()
         mock_router = AsyncMock()
-        # First call fails, second succeeds
         mock_router.execute.side_effect = [
             Exception("TTS error"),
             b"fake-audio-bytes",
         ]
 
         # Use long sentences (>= 40 chars) so they don't merge
-        with patch(
-            "nova.audio.streaming_tts.play_audio", new_callable=AsyncMock,
+        with patch.object(
+            player, "_play_with_tracking", new_callable=AsyncMock, return_value=True,
         ) as mock_play:
             await player.synthesize_and_play(
                 "Kalimat pertama ini akan mengalami kegagalan. "
@@ -157,5 +159,29 @@ class TestStreamingTTSPlayer:
                 mock_router, "id",
             )
 
-        # Only the second sentence should have been played
         mock_play.assert_called_once_with(b"fake-audio-bytes")
+
+    @pytest.mark.asyncio
+    async def test_stop_prevents_playback(self):
+        player = StreamingTTSPlayer()
+        mock_router = AsyncMock()
+        mock_router.execute.return_value = b"fake-audio-bytes"
+
+        player.stop()  # Pre-set the stop flag
+
+        with patch.object(
+            player, "_play_with_tracking", new_callable=AsyncMock, return_value=False,
+        ):
+            result = await player.synthesize_and_play(
+                "Halo saya Nova.", mock_router, "id",
+            )
+
+        assert result == 0.0
+
+    @pytest.mark.asyncio
+    async def test_reset_stop_clears_flag(self):
+        player = StreamingTTSPlayer()
+        player.stop()
+        assert player.stopped is True
+        player.reset_stop()
+        assert player.stopped is False

@@ -107,6 +107,38 @@ def _is_hallucination(text: str) -> bool:
     return False
 
 
+def _has_mixed_scripts(text: str) -> bool:
+    """Detect multilingual hallucination via Unicode script diversity.
+
+    Whisper generates garbage mixing Latin, Hangul, CJK, Cyrillic, Arabic,
+    etc. when fed noise or silence.  Normal Indonesian/English text only
+    uses Latin characters, so 3+ distinct script families is a strong
+    hallucination signal.
+    """
+    scripts: set[str] = set()
+    for ch in text:
+        cp = ord(ch)
+        if 0x0041 <= cp <= 0x024F or 0x1E00 <= cp <= 0x1EFF:
+            scripts.add("Latin")
+        elif 0xAC00 <= cp <= 0xD7AF or 0x1100 <= cp <= 0x11FF:
+            scripts.add("Hangul")
+        elif 0x4E00 <= cp <= 0x9FFF or 0x3400 <= cp <= 0x4DBF:
+            scripts.add("CJK")
+        elif 0x0400 <= cp <= 0x052F:
+            scripts.add("Cyrillic")
+        elif 0x0600 <= cp <= 0x06FF or 0x0750 <= cp <= 0x077F or 0xFB50 <= cp <= 0xFDFF:
+            scripts.add("Arabic")
+        elif 0x3040 <= cp <= 0x30FF:
+            scripts.add("Japanese")
+        elif 0x0900 <= cp <= 0x097F:
+            scripts.add("Devanagari")
+        elif 0x0E00 <= cp <= 0x0E7F:
+            scripts.add("Thai")
+        if len(scripts) >= 3:
+            return True
+    return False
+
+
 class GroqWhisperProvider(STTProvider):
     """Speech-to-Text using Groq's Whisper API.
 
@@ -210,6 +242,15 @@ class GroqWhisperProvider(STTProvider):
             if text and _is_hallucination(text):
                 logger.info(
                     "Groq Whisper: rejected hallucination %r", text,
+                )
+                return ""
+
+            # --- Gate 4: mixed-script hallucination filter ---
+            if text and _has_mixed_scripts(text):
+                logger.info(
+                    "Groq Whisper: rejected mixed-script hallucination "
+                    "(%d chars, sample: %r)",
+                    len(text), text[:80],
                 )
                 return ""
 
