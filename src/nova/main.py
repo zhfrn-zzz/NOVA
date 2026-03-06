@@ -653,16 +653,35 @@ async def _async_main() -> None:
 
     orchestrator = Orchestrator()
 
-    if args.text_only:
-        await _text_mode(orchestrator)
-    elif args.push_to_talk:
-        await _voice_mode(orchestrator)
-    elif args.hotkey:
-        # Forced hotkey mode
-        await _wake_word_mode(orchestrator, force_hotkey=True)
-    else:
-        # Default: OpenWakeWord always-listening (hotkey fallback)
-        await _wake_word_mode(orchestrator)
+    # Start remote agent WebSocket server
+    if config.remote_agent_enabled:
+        try:
+            from nova.remote.server import start_remote_server
+
+            await start_remote_server()
+            console.print(
+                f"[dim]Remote agent server on ws://0.0.0.0:{config.remote_agent_port}[/]"
+            )
+        except Exception as e:
+            logging.getLogger(__name__).warning("Remote agent server failed to start: %s", e)
+
+    try:
+        if args.text_only:
+            await _text_mode(orchestrator)
+        elif args.push_to_talk:
+            await _voice_mode(orchestrator)
+        elif args.hotkey:
+            await _wake_word_mode(orchestrator, force_hotkey=True)
+        else:
+            await _wake_word_mode(orchestrator)
+    finally:
+        if config.remote_agent_enabled:
+            try:
+                from nova.remote.server import stop_remote_server
+
+                await stop_remote_server()
+            except Exception:
+                pass
 
     console.print("\n[bold green]Sampai jumpa![/] (Goodbye!)")
 

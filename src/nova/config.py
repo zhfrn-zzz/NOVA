@@ -83,6 +83,11 @@ class NovaConfig(BaseSettings):
     sleep_reminder_enabled: bool = True
     ambient_presence_threshold: float = 0.005  # RMS below = likely away
 
+    # Remote agent (WebSocket)
+    remote_agent_enabled: bool = True
+    remote_agent_port: int = 8765
+    remote_agent_token: str = ""  # Shared secret for auth; leave empty to disable auth
+
     # Custom sounds
     custom_sounds_enabled: bool = True
     custom_sounds_dir: str = "sounds"  # Relative to project root, or absolute path

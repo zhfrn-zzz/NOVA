@@ -103,6 +103,9 @@ nova/
 │       │       ├── google_cloud_tts.py  # Google Cloud TTS (Chirp 3 HD, primary)
 │       │       ├── edge_tts_provider.py
 │       │       └── cloudflare_tts.py
+│       ├── remote/
+│       │   ├── __init__.py
+│       │   └── server.py         # WebSocket server for remote agent connections
 │       ├── iot/
 │       │   ├── __init__.py
 │       │   ├── tuya_cloud.py     # Tuya Cloud IR driver (AC, TV remote)
@@ -157,6 +160,12 @@ nova/
 │   ├── test_weather.py             # Phase 2: Weather tool
 │   ├── test_tts_cache.py           # Phase 5: TTS audio cache
 │   └── test_iot.py                 # Phase 6: IoT device control
+├── nova-agent/
+│   ├── nova_agent.py             # Windows system tray agent (pystray + WebSocket)
+│   ├── requirements.txt          # Agent-only dependencies
+│   ├── start_agent.bat           # Console launcher for debugging
+│   ├── build.bat                 # PyInstaller build → single .exe
+│   └── install_startup.bat       # Add agent to Windows Startup folder
 └── scripts/
     ├── setup.sh                  # Full dependency install script
     └── nova.service              # systemd auto-start
@@ -217,6 +226,7 @@ nova/
 - [x] Task 49: TTFA optimization — sub-sentence clause flushing for first sentence, Google Cloud TTS client pre-init at startup, in-memory TTS audio cache (LRU), parallel TTS prefetch in streaming consumer (Phase 5)
 - [x] Task 50: IoT integration Phase 1 — AC control via Tuya Cloud IR, TV Atas (IR+WebOS), TV Bawah (WebOS only), control_device tool, smart dispatch (Phase 6)
 - [x] Task 51: TV music playback — play_music target param for TV Atas/Bawah via WebOS YouTube deep-link, auto IR power-on (Phase 6)
+- [x] Task 52: Remote agent — WebSocket server + standalone Windows agent for remote PC control, auto-route system tools to connected agent (Phase 7)
 
 ## Important Notes
 

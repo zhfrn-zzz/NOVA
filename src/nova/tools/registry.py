@@ -991,6 +991,10 @@ def get_tool_declarations_openai() -> list[dict]:
 async def execute_tool(name: str, args: dict | None = None) -> str:
     """Execute a tool by name and return its result.
 
+    If a remote agent is connected and the tool is remote-capable,
+    the call is forwarded to the agent via WebSocket.  Otherwise
+    it runs locally.
+
     Args:
         name: The function name as returned by the LLM function call.
         args: Arguments dict (most tools take none).
@@ -1001,11 +1005,27 @@ async def execute_tool(name: str, args: dict | None = None) -> str:
     Raises:
         ValueError: If the tool name is unknown.
     """
+    # Try remote dispatch first
+    try:
+        from nova.remote.server import get_remote_server, should_route_remote
+
+        server = get_remote_server()
+        if server and server.has_agent and should_route_remote(name, args):
+            logger.info(
+                "Routing tool to remote agent (%s): %s(%s)",
+                server.agent_device, name, args or "",
+            )
+            result = await server.execute_remote(name, args)
+            logger.info("Remote tool %s result: %s", name, result)
+            return result
+    except Exception:
+        logger.debug("Remote dispatch unavailable, falling back to local", exc_info=True)
+
     impl = _TOOL_IMPLEMENTATIONS.get(name)
     if impl is None:
         raise ValueError(f"Unknown tool: {name!r}")
 
-    logger.info("Executing tool: %s(%s)", name, args or "")
+    logger.info("Executing tool locally: %s(%s)", name, args or "")
     result = await impl(**(args or {}))
     logger.info("Tool %s result: %s", name, result)
     return result
