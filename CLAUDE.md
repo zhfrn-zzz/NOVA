@@ -110,6 +110,11 @@ nova/
 │       ├── remote/
 │       │   ├── __init__.py
 │       │   └── server.py         # WebSocket server for remote agent connections
+│       ├── messaging/
+│       │   ├── __init__.py
+│       │   ├── telegram_bot.py   # Telegram bot (aiogram, in-process async task)
+│       │   ├── whatsapp_client.py # WhatsApp bridge client (HTTP to wa-bridge Node.js)
+│       │   └── formatter.py      # Response formatting per messaging platform
 │       ├── iot/
 │       │   ├── __init__.py
 │       │   ├── tuya_cloud.py     # Tuya Cloud IR driver (AC, TV remote)
@@ -164,7 +169,12 @@ nova/
 │   ├── test_weather.py             # Phase 2: Weather tool
 │   ├── test_tts_cache.py           # Phase 5: TTS audio cache
 │   ├── test_iot.py                 # Phase 6: IoT device control
-│   └── test_deeptalk.py            # Phase 8: DeepTalk continuous conversation
+│   ├── test_deeptalk.py            # Phase 8: DeepTalk continuous conversation
+│   └── test_messaging.py          # Phase 9: Telegram bot + WhatsApp client
+├── wa-bridge/                     # Separate Node.js project (WhatsApp bridge)
+│   ├── package.json
+│   ├── index.js                   # Baileys + Express HTTP server
+│   └── auth/                      # Auto-created after QR scan
 ├── nova-agent/
 │   ├── nova_agent.py             # Windows system tray agent (pystray + WebSocket)
 │   ├── requirements.txt          # Agent-only dependencies
@@ -233,6 +243,7 @@ nova/
 - [x] Task 51: TV music playback — play_music target param for TV Atas/Bawah via WebOS YouTube deep-link, auto IR power-on (Phase 6)
 - [x] Task 52: Remote agent — WebSocket server + standalone Windows agent for remote PC control, auto-route system tools to connected agent (Phase 7)
 - [x] Task 53: DeepTalk mode — continuous conversation without wake word, barge-in with Silero VAD ONNX, stoppable TTS, voice/keyboard entry/exit (Phase 8)
+- [x] Task 54: Messaging integration — Telegram bot (aiogram) + WhatsApp bridge (Baileys Node.js), orchestrator mode="text", per-channel text-only path (Phase 9)
 
 ## Important Notes
 

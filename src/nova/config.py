@@ -95,6 +95,14 @@ class NovaConfig(BaseSettings):
     deeptalk_min_speech_duration: float = 0.3  # Seconds of speech to confirm detection
     deeptalk_vad_model_path: str = "models/silero_vad.onnx"
 
+    # Telegram bot
+    telegram_bot_token: str = ""  # from TELEGRAM_BOT_TOKEN env
+    telegram_allowed_users: list[int] = []  # from TELEGRAM_ALLOWED_USER_IDS env (comma-separated)
+
+    # WhatsApp bridge
+    whatsapp_enabled: bool = False
+    whatsapp_allowed_jids: list[str] = []  # Full JIDs e.g. "628xxx:0@lid" (comma-separated)
+
     # Custom sounds
     custom_sounds_enabled: bool = True
     custom_sounds_dir: str = "sounds"  # Relative to project root, or absolute path

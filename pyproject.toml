@@ -32,6 +32,8 @@ dependencies = [
     "tinytuya>=1.15",
     "aiowebostv>=0.4",
     "websockets>=13.0",
+    "aiogram>=3.0",
+    "aiohttp>=3.9",
 ]
 
 [project.optional-dependencies]

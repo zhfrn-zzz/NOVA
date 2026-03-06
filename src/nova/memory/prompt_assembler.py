@@ -122,6 +122,9 @@ class PromptAssembler:
         # Pending notification context (set by orchestrator, consumed by build())
         self._pending_notification_context: str = ""
 
+        # Interaction mode: "voice" (default) or "text" (messaging)
+        self._interaction_mode: str = "voice"
+
         # Ensure directory and defaults exist
         self._ensure_defaults()
 
@@ -185,9 +188,14 @@ class PromptAssembler:
         if soul:
             sections.append(soul)
 
-        # 2. Rules (RULES.md)
+        # 2. Rules (RULES.md) — adjust for interaction mode
         rules = self._read_cached("RULES.md")
         if rules:
+            mode = self._interaction_mode
+            self._interaction_mode = "voice"  # Reset after consumption
+            if mode == "text":
+                # Text mode (messaging): replace voice-specific constraints
+                rules = self._adapt_rules_for_text(rules)
             sections.append(rules)
 
         # 3. User profile (USER.md)
@@ -211,9 +219,11 @@ class PromptAssembler:
         notif_ctx = self._pending_notification_context
         self._pending_notification_context = ""  # Consume once
         if notif_ctx:
-            sections.append(
-                f"IMPORTANT — You MUST deliver these notifications in your next response. Do not ignore them:\n{notif_ctx}"
+            notif_header = (
+                "IMPORTANT — You MUST deliver these notifications"
+                " in your next response. Do not ignore them:"
             )
+            sections.append(f"{notif_header}\n{notif_ctx}")
 
         return "\n\n".join(sections)
 
@@ -270,6 +280,47 @@ class PromptAssembler:
             context: Formatted notification context string.
         """
         self._pending_notification_context = context
+
+    def set_interaction_mode(self, mode: str) -> None:
+        """Set the interaction mode for the next build() call.
+
+        Consumed (reset to "voice") after the next build() call.
+
+        Args:
+            mode: "voice" for TTS output, "text" for messaging platforms.
+        """
+        self._interaction_mode = mode
+
+    @staticmethod
+    def _adapt_rules_for_text(rules: str) -> str:
+        """Adapt RULES.md content for text messaging mode.
+
+        Replaces voice-specific constraints (plain text only, no markdown)
+        with messaging-friendly instructions.
+
+        Args:
+            rules: Original RULES.md content.
+
+        Returns:
+            Modified rules suitable for text messaging responses.
+        """
+        # Remove voice-specific lines
+        voice_lines = [
+            "- Responses will be spoken aloud — plain text only.",
+            "- No markdown, bullet points, asterisks, emoji, exclamation marks.",
+        ]
+        for line in voice_lines:
+            rules = rules.replace(line, "")
+
+        # Add text messaging context
+        text_addendum = (
+            "\nYou are responding via text message (Telegram/WhatsApp). "
+            "You may use light formatting for readability. "
+            "Keep responses concise — this is mobile messaging."
+        )
+        rules = rules.rstrip() + text_addendum
+
+        return rules
 
 
 def get_prompt_assembler() -> PromptAssembler:

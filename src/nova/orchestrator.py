@@ -349,6 +349,41 @@ class Orchestrator:
         )
         return response, total
 
+    async def _respond_text_only(
+        self, user_input: str,
+    ) -> tuple[str, float]:
+        """Text-only path: LLM with tools, no TTS.
+
+        Used by messaging channels (Telegram, WhatsApp) where audio
+        output is not needed. Runs the same LLM pipeline including
+        tools and memory but skips all TTS processing.
+
+        Returns (response_text, total_time).
+        """
+        # Inject memory context
+        memory_context = await self._get_memory_context(user_input)
+        if memory_context:
+            get_prompt_assembler().set_memory_context(memory_context)
+
+        # Inject passive notifications
+        self._inject_passive_notifications()
+
+        # Set text-mode flag for prompt assembler
+        get_prompt_assembler().set_interaction_mode("text")
+
+        context = self._context.get_context()
+        start = time.perf_counter()
+
+        response = await self._llm_router.execute(
+            "generate", user_input, context, self._tools,
+        )
+        total = time.perf_counter() - start
+
+        logger.info(
+            "Text-only response: %.2fs, %d chars", total, len(response),
+        )
+        return response, total
+
     async def process_text(self, text: str) -> tuple[str, float]:
         """Send text to the LLM and return the response with timing.
 
@@ -405,8 +440,8 @@ class Orchestrator:
             logger.exception("TTS playback error — response printed only")
             return 0.0
 
-    async def handle_interaction(self, user_input: str) -> str:
-        """Process a full text interaction: LLM response + TTS playback.
+    async def handle_interaction(self, user_input: str, mode: str = "voice") -> str:
+        """Process a full text interaction: LLM response + optional TTS playback.
 
         Uses a single unified streaming path with tools always enabled.
         The LLM decides whether to call tools — no keyword heuristics.
@@ -414,6 +449,9 @@ class Orchestrator:
 
         Args:
             user_input: The user's text input.
+            mode: Interaction mode.
+                "voice" — stream response via TTS (default, existing behavior).
+                "text" — return text response as string (for Telegram/WhatsApp).
 
         Returns:
             The assistant's response text, or error message.
@@ -421,25 +459,28 @@ class Orchestrator:
         self._interaction_count += 1
         interaction_id = self._interaction_count
 
-        # Warmup TTS on first interaction (non-blocking)
-        if not self._tts_warmed_up:
+        # Warmup TTS on first interaction (non-blocking) — voice mode only
+        if mode == "voice" and not self._tts_warmed_up:
             asyncio.ensure_future(self._warmup_tts())
 
         try:
-            # Primary path: unified streaming with tools
-            result = await self._respond(user_input)
-            if result is not None:
-                response, total_time = result
-                logger.info(
-                    "[#%d] Streaming path succeeded", interaction_id,
-                )
+            if mode == "text":
+                # Text mode: LLM only, no TTS (for Telegram/WhatsApp)
+                response, total_time = await self._respond_text_only(user_input)
             else:
-                # Streaming failed — fall back to non-streaming
-                logger.info(
-                    "[#%d] Streaming failed, falling back to non-streaming",
-                    interaction_id,
-                )
-                response, total_time = await self._respond_fallback(user_input)
+                # Voice mode: unified streaming with tools + TTS
+                result = await self._respond(user_input)
+                if result is not None:
+                    response, total_time = result
+                    logger.info(
+                        "[#%d] Streaming path succeeded", interaction_id,
+                    )
+                else:
+                    logger.info(
+                        "[#%d] Streaming failed, falling back to non-streaming",
+                        interaction_id,
+                    )
+                    response, total_time = await self._respond_fallback(user_input)
 
         except AllProvidersFailedError:
             logger.error("[#%d] All LLM providers failed", interaction_id)

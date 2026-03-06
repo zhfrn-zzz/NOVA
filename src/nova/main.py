@@ -742,6 +742,37 @@ async def _async_main() -> None:
         except Exception as e:
             logging.getLogger(__name__).warning("Remote agent server failed to start: %s", e)
 
+    # Start Telegram bot (if configured)
+    telegram_task = None
+    if config.telegram_bot_token and config.telegram_allowed_users:
+        try:
+            from nova.messaging.telegram_bot import NovaTelegramBot
+
+            tg_bot = NovaTelegramBot(
+                token=config.telegram_bot_token,
+                allowed_users=config.telegram_allowed_users,
+                orchestrator=orchestrator,
+            )
+            telegram_task = asyncio.create_task(tg_bot.start())
+            console.print("[dim]Telegram bot started[/]")
+        except Exception as e:
+            logging.getLogger(__name__).warning("Telegram bot failed to start: %s", e)
+
+    # Start WhatsApp bridge client (if enabled)
+    wa_client = None
+    if config.whatsapp_enabled:
+        try:
+            from nova.messaging.whatsapp_client import NovaWhatsAppClient
+
+            wa_client = NovaWhatsAppClient(
+                orchestrator=orchestrator,
+                allowed_numbers=config.whatsapp_allowed_jids or None,
+            )
+            await wa_client.start()
+            console.print("[dim]WhatsApp client started (bridge at localhost:3001)[/]")
+        except Exception as e:
+            logging.getLogger(__name__).warning("WhatsApp client failed to start: %s", e)
+
     try:
         if args.text_only:
             await _text_mode(orchestrator)
@@ -754,6 +785,16 @@ async def _async_main() -> None:
     except Exception:
         logging.getLogger(__name__).exception("NOVA terminated unexpectedly")
     finally:
+        # Stop messaging services
+        if telegram_task:
+            telegram_task.cancel()
+            try:
+                await telegram_task
+            except asyncio.CancelledError:
+                pass
+        if wa_client:
+            await wa_client.stop()
+
         if config.remote_agent_enabled:
             try:
                 from nova.remote.server import stop_remote_server
