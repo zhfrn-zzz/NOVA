@@ -63,7 +63,7 @@ class TestTelegramBotAuth:
 class TestWhatsAppClient:
     """Test NovaWhatsAppClient authorization and message handling."""
 
-    def _make_client(self, allowed_numbers: list[str] | None = None):
+    def _make_client(self, allowed_jids: list[str] | None = None):
         """Create a NovaWhatsAppClient with mocked orchestrator."""
         from nova.messaging.whatsapp_client import NovaWhatsAppClient
 
@@ -71,22 +71,20 @@ class TestWhatsAppClient:
         orchestrator.handle_interaction = AsyncMock(return_value="test response")
         client = NovaWhatsAppClient(
             orchestrator=orchestrator,
-            allowed_numbers=allowed_numbers,
+            allowed_jids=allowed_jids,
             port=0,  # Won't actually bind
         )
         return client, orchestrator
 
     @pytest.mark.asyncio
-    async def test_incoming_authorized(self):
-        """Authorized sender gets a response."""
+    async def test_incoming_authorized_bare_number(self):
+        """Bare phone number in allowed list matches @s.whatsapp.net sender."""
         client, orchestrator = self._make_client(["628123456789"])
 
-        # Simulate request
         request = MagicMock()
         request.json = AsyncMock(return_value={
-            "sender": "628123456789",
+            "sender": "628123456789@s.whatsapp.net",
             "text": "nyalakan AC",
-            "jid": "628123456789@s.whatsapp.net",
         })
 
         resp = await client._handle_incoming(request)
@@ -97,13 +95,53 @@ class TestWhatsAppClient:
         )
 
     @pytest.mark.asyncio
-    async def test_incoming_unauthorized(self):
-        """Unauthorized sender gets empty reply."""
-        client, orchestrator = self._make_client(["628123456789"])
+    async def test_incoming_authorized_lid(self):
+        """@lid JID in allowed list matches @lid sender."""
+        client, orchestrator = self._make_client(["134711984783457@lid"])
 
         request = MagicMock()
         request.json = AsyncMock(return_value={
-            "sender": "628999999999",
+            "sender": "134711984783457@lid",
+            "text": "hello",
+        })
+
+        resp = await client._handle_incoming(request)
+        assert b"test response" in resp.body
+
+    @pytest.mark.asyncio
+    async def test_incoming_authorized_mixed_formats(self):
+        """Both @lid and @s.whatsapp.net in allowed list works."""
+        client, orchestrator = self._make_client([
+            "134711984783457@lid",
+            "628123456789@s.whatsapp.net",
+        ])
+
+        # Message from @lid
+        request = MagicMock()
+        request.json = AsyncMock(return_value={
+            "sender": "134711984783457@lid",
+            "text": "hello lid",
+        })
+        await client._handle_incoming(request)
+        assert orchestrator.handle_interaction.await_count == 1
+
+        # Message from @s.whatsapp.net
+        request2 = MagicMock()
+        request2.json = AsyncMock(return_value={
+            "sender": "628123456789@s.whatsapp.net",
+            "text": "hello snet",
+        })
+        await client._handle_incoming(request2)
+        assert orchestrator.handle_interaction.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_incoming_unauthorized(self):
+        """Unauthorized sender gets empty reply."""
+        client, orchestrator = self._make_client(["628123456789@s.whatsapp.net"])
+
+        request = MagicMock()
+        request.json = AsyncMock(return_value={
+            "sender": "628999999999@s.whatsapp.net",
             "text": "hack the planet",
         })
 

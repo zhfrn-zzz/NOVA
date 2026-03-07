@@ -773,7 +773,7 @@ async def _async_main() -> None:
 
             wa_client = NovaWhatsAppClient(
                 orchestrator=orchestrator,
-                allowed_numbers=config.whatsapp_allowed_jids or None,
+                allowed_jids=config.whatsapp_allowed_jids or None,
             )
             await wa_client.start()
             console.print("[dim]WhatsApp client started (bridge at localhost:3001)[/]")

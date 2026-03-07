@@ -93,7 +93,7 @@ class NovaConfig(BaseSettings):
 
     # WhatsApp bridge
     whatsapp_enabled: bool = False
-    whatsapp_allowed_jids: list[str] = []  # Full JIDs e.g. "628xxx:0@lid" (comma-separated)
+    whatsapp_allowed_jids: list[str] = []  # @lid, @s.whatsapp.net, or bare phone
 
     # Custom sounds
     custom_sounds_enabled: bool = True

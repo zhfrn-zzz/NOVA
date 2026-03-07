@@ -12,9 +12,31 @@ const PORT = process.env.WA_BRIDGE_PORT || 3001;
 
 // Allowed JIDs — supports both @lid and @s.whatsapp.net formats
 // Set in .env as comma-separated: "628xxx:0@lid,628yyy@s.whatsapp.net"
-const ALLOWED_JIDS = (process.env.WA_ALLOWED_JIDS || "")
+// Bare phone numbers (e.g. "6282246965391") also work and match @s.whatsapp.net
+const RAW_ALLOWED = (process.env.WA_ALLOWED_JIDS || "")
     .split(",")
     .filter(Boolean);
+
+// Pre-expand each entry into all match keys (bare numbers ↔ @s.whatsapp.net)
+const ALLOWED_KEYS = new Set();
+for (const entry of RAW_ALLOWED) {
+    ALLOWED_KEYS.add(entry);
+    if (entry.endsWith("@s.whatsapp.net")) {
+        ALLOWED_KEYS.add(entry.split("@")[0]);
+    } else if (!entry.includes("@")) {
+        ALLOWED_KEYS.add(`${entry}@s.whatsapp.net`);
+    }
+}
+
+function isAllowedJid(jid) {
+    if (ALLOWED_KEYS.size === 0) return true; // no filter = accept all
+    // Check the JID itself and (for @s.whatsapp.net) the bare phone number
+    if (ALLOWED_KEYS.has(jid)) return true;
+    if (jid.endsWith("@s.whatsapp.net") && ALLOWED_KEYS.has(jid.split("@")[0])) {
+        return true;
+    }
+    return false;
+}
 
 const logger = pino({ level: "warn" });
 const app = express();
@@ -71,11 +93,8 @@ async function connectWA() {
             const jid = msg.key.remoteJid;
             if (!jid) continue;
 
-            // Authorization check — match full JID (works for both @lid and @s.whatsapp.net)
-            if (
-                ALLOWED_JIDS.length > 0 &&
-                !ALLOWED_JIDS.includes(jid)
-            ) {
+            // Authorization check — smart match (supports @lid, @s.whatsapp.net, and bare numbers)
+            if (!isAllowedJid(jid)) {
                 console.log(
                     `Unauthorized message from ${jid}, ignoring`
                 );

@@ -5,6 +5,14 @@ Architecture:
 2. Registers this callback URL with wa-bridge.
 3. When wa-bridge receives a WhatsApp message, it POSTs to NOVA's callback.
 4. NOVA processes the message through orchestrator and returns the reply.
+
+JID formats:
+WhatsApp uses two JID formats that may both appear for the same user:
+- Legacy: ``6282246965391@s.whatsapp.net``
+- Modern (LID): ``134711984783457@lid``
+Both must be listed in the allowed JIDs for full coverage.
+Bare phone numbers (``6282246965391``) are also accepted and will
+match incoming ``@s.whatsapp.net`` JIDs automatically.
 """
 
 import logging
@@ -17,6 +25,30 @@ logger = logging.getLogger(__name__)
 WA_BRIDGE_URL = "http://localhost:3001"
 
 
+def _jid_match_keys(jid: str) -> set[str]:
+    """Return all match keys for a JID or bare phone number.
+
+    This allows flexible matching: a bare number matches its
+    ``@s.whatsapp.net`` form and vice-versa. ``@lid`` JIDs are
+    only matched exactly.
+
+    Examples:
+        >>> _jid_match_keys("628123@s.whatsapp.net")
+        {'628123@s.whatsapp.net', '628123'}
+        >>> _jid_match_keys("628123")
+        {'628123', '628123@s.whatsapp.net'}
+        >>> _jid_match_keys("134711984783457@lid")
+        {'134711984783457@lid'}
+    """
+    keys: set[str] = {jid}
+    if jid.endswith("@s.whatsapp.net"):
+        keys.add(jid.split("@")[0])  # bare phone number
+    elif "@" not in jid:
+        # Bare phone number — also match the full @s.whatsapp.net form
+        keys.add(f"{jid}@s.whatsapp.net")
+    return keys
+
+
 class NovaWhatsAppClient:
     """Client that connects NOVA to the WhatsApp bridge.
 
@@ -27,18 +59,23 @@ class NovaWhatsAppClient:
     def __init__(
         self,
         orchestrator,  # noqa: ANN001
-        allowed_numbers: list[str] | None = None,
+        allowed_jids: list[str] | None = None,
         port: int = 3002,
     ) -> None:
         """Initialize the WhatsApp client.
 
         Args:
             orchestrator: NOVA Orchestrator instance.
-            allowed_numbers: Authorized phone numbers (628xxx format).
+            allowed_jids: Authorized JIDs. Supports ``@lid``,
+                ``@s.whatsapp.net``, and bare phone numbers.
             port: Local port for the callback HTTP server.
         """
         self._orchestrator = orchestrator
-        self._allowed = set(allowed_numbers or [])
+        # Pre-expand all allowed entries into a single match-key set
+        self._allowed_keys: set[str] = set()
+        for entry in (allowed_jids or []):
+            if entry:
+                self._allowed_keys.update(_jid_match_keys(entry))
         self._port = port
         self._app = web.Application()
         self._runner: web.AppRunner | None = None
@@ -66,7 +103,8 @@ class NovaWhatsAppClient:
                 return web.json_response({"reply": ""})
 
             # Authorization (double-check, bridge also checks)
-            if self._allowed and sender not in self._allowed:
+            sender_keys = _jid_match_keys(sender)
+            if self._allowed_keys and not sender_keys & self._allowed_keys:
                 logger.warning("Unauthorized WhatsApp message from %s", sender)
                 return web.json_response({"reply": ""})
 
