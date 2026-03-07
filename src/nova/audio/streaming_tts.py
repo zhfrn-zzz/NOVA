@@ -192,29 +192,47 @@ class StreamingTTSPlayer:
             self._playback_process = process
 
             wait_task = asyncio.create_task(process.wait())
+            stop_event = asyncio.Event()
+
+            # Monitor stop flag in a separate coroutine
+            async def _watch_stop():
+                while not self._stop_flag.is_set():
+                    await asyncio.sleep(0.05)
+                stop_event.set()
+
+            watcher = asyncio.create_task(_watch_stop())
             try:
-                while not wait_task.done():
-                    if self._stop_flag.is_set():
+                done, pending = await asyncio.wait(
+                    [wait_task, asyncio.create_task(stop_event.wait())],
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+
+                if wait_task not in done:
+                    # Stop was requested before playback finished
+                    try:
+                        process.terminate()
+                    except (ProcessLookupError, OSError):
+                        pass
+                    try:
+                        await asyncio.wait_for(process.wait(), timeout=0.5)
+                    except (asyncio.TimeoutError, ProcessLookupError):
                         try:
-                            process.terminate()
+                            process.kill()
                         except (ProcessLookupError, OSError):
                             pass
-                        try:
-                            await asyncio.wait_for(process.wait(), timeout=0.5)
-                        except (asyncio.TimeoutError, ProcessLookupError):
-                            try:
-                                process.kill()
-                            except (ProcessLookupError, OSError):
-                                pass
-                        return False
-                    await asyncio.sleep(0.05)
+                    return False
             finally:
+                watcher.cancel()
                 if not wait_task.done():
                     wait_task.cancel()
                     try:
                         await wait_task
                     except asyncio.CancelledError:
                         pass
+                # Cancel any remaining pending tasks
+                for t in pending if 'pending' in dir() else []:
+                    if not t.done():
+                        t.cancel()
 
             if process.returncode and process.returncode != 0:
                 logger.warning(

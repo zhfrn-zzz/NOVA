@@ -54,7 +54,7 @@ class TestToolRegistry:
             "open_terminal", "open_file_manager",
             "lock_screen", "shutdown_pc", "restart_pc", "sleep_pc",
             "take_screenshot", "set_timer",
-            "web_search", "remember_fact", "recall_facts",
+            "web_search",
             # New tools
             "get_battery_level", "get_ram_usage", "get_storage_info",
             "get_ip_address", "get_system_uptime",

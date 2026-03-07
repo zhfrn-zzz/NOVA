@@ -126,7 +126,10 @@ class Orchestrator:
 
         # Backfill existing memories without embeddings
         if self._embedding_fn:
-            asyncio.ensure_future(self._backfill_startup())
+            try:
+                asyncio.ensure_future(self._backfill_startup())
+            except RuntimeError:
+                pass  # No event loop yet — backfill will run later
 
         # --- Heartbeat scheduler ---
         self._notification_queue = NotificationQueue()
@@ -301,44 +304,57 @@ class Orchestrator:
         self._inject_passive_notifications()
 
         context = self._context.get_context()
-        provider = self._llm_router.providers[0]
 
-        try:
-            start = time.perf_counter()
-            sentence_stream = provider.generate_stream(
-                user_input, context, tools=self._tools,
-            )
-            full_text, tts_time = await self._streaming_tts.stream_from_llm(
-                sentence_stream, self._tts_router, language="auto",
-            )
-            total = time.perf_counter() - start
+        # Try each LLM provider in priority order (failover)
+        for provider in self._llm_router.providers:
+            try:
+                start = time.perf_counter()
+                sentence_stream = provider.generate_stream(
+                    user_input, context, tools=self._tools,
+                )
+                full_text, tts_time = await self._streaming_tts.stream_from_llm(
+                    sentence_stream, self._tts_router, language="auto",
+                )
+                total = time.perf_counter() - start
 
-            if not full_text:
-                if self._streaming_tts.stopped:
-                    return "", 0.0
-                return None
+                if not full_text:
+                    if self._streaming_tts.stopped:
+                        return "", 0.0
+                    return None
 
-            logger.info(
-                "Streaming response: %.2fs total (TTS: %.2fs), %d chars",
-                total, tts_time, len(full_text),
-            )
-            return full_text, total
-        except Exception:
-            logger.warning("Streaming path failed, will fall back", exc_info=True)
-            return None
+                logger.info(
+                    "Streaming response: %.2fs total (TTS: %.2fs), %d chars",
+                    total, tts_time, len(full_text),
+                )
+                return full_text, total
+            except Exception:
+                logger.warning(
+                    "Streaming via %s failed, trying next",
+                    provider.name, exc_info=True,
+                )
+                continue
+        return None
 
     async def _respond_fallback(
         self, user_input: str,
     ) -> tuple[str, float]:
-        """Non-streaming fallback: LLM with function calling → streaming TTS.
+        """Non-streaming fallback: LLM generate() → streaming TTS.
 
-        Used when streaming fails (e.g., provider doesn't support streaming).
+        Used when all streaming providers fail. Uses the already-prepared
+        context (memory + notifications were injected by _respond() before
+        this is called) — does NOT re-retrieve memory to avoid stale context.
 
         Returns (response_text, total_time). Raises on total failure.
         """
         start = time.perf_counter()
 
-        response, llm_time = await self.process_text(user_input)
+        context = self._context.get_context()
+        llm_start = time.perf_counter()
+        response = await self._llm_router.execute(
+            "generate", user_input, context, self._tools,
+        )
+        llm_time = time.perf_counter() - llm_start
+
         language = detect_language(response)
         tts_time = await self.speak(response, language=language)
         total = time.perf_counter() - start
@@ -500,89 +516,6 @@ class Orchestrator:
 
         return response
 
-    async def handle_voice_interaction(self) -> str | None:
-        """Process a full voice interaction: capture -> STT -> LLM -> TTS -> playback.
-
-        Uses the same unified streaming path as handle_interaction.
-
-        Returns:
-            The assistant's response text, None if no speech, or error string.
-        """
-        self._interaction_count += 1
-        interaction_id = self._interaction_count
-        total_start = time.perf_counter()
-
-        # Warmup TTS on first interaction (non-blocking)
-        if not self._tts_warmed_up:
-            asyncio.ensure_future(self._warmup_tts())
-
-        # 1. Capture audio from microphone
-        try:
-            audio_capture = self._get_audio_capture()
-            wav_bytes = await audio_capture.capture()
-        except OSError as e:
-            logger.error("[#%d] Audio device error: %s", interaction_id, e)
-            return "__AUDIO_DEVICE_ERROR__"
-        except Exception as e:
-            logger.exception("[#%d] Audio capture error: %s", interaction_id, e)
-            return "__AUDIO_DEVICE_ERROR__"
-
-        # Check for empty audio (no speech detected)
-        if len(wav_bytes) <= 44:
-            return None
-
-        # 2. STT: transcribe audio
-        stt_start = time.perf_counter()
-        try:
-            transcript = await self._stt_router.execute("transcribe", wav_bytes)
-            stt_time = time.perf_counter() - stt_start
-        except AllProvidersFailedError:
-            logger.error("[#%d] All STT providers failed", interaction_id)
-            return "__STT_FAILED__"
-        except Exception:
-            logger.exception("[#%d] STT error", interaction_id)
-            return "__STT_FAILED__"
-
-        if not transcript or not transcript.strip():
-            return None
-
-        transcript = transcript.strip()
-
-        # 3. LLM → TTS: unified streaming path with tools
-        try:
-            result = await self._respond(transcript)
-            if result is not None:
-                response, _ = result
-            else:
-                response, _ = await self._respond_fallback(transcript)
-        except AllProvidersFailedError:
-            logger.error("[#%d] All LLM providers failed", interaction_id)
-            return "Semua layanan sedang sibuk, coba lagi sebentar."
-        except Exception:
-            logger.exception("[#%d] Unexpected LLM/TTS error", interaction_id)
-            return "Terjadi kesalahan, tapi saya masih berjalan."
-
-        # 4. Store in context (async)
-        await self._context.add_exchange(transcript, response)
-
-        total_time = time.perf_counter() - total_start
-        logger.info(
-            "Voice #%d complete — STT: %.2fs | Total: %.2fs | %r → %d chars",
-            interaction_id, stt_time, total_time,
-            transcript[:80], len(response),
-        )
-
-        return response
-
-    @property
-    def last_transcript(self) -> str | None:
-        """Return the last user message from context, if any."""
-        context = self._context.get_context()
-        for msg in reversed(context):
-            if msg["role"] == "user":
-                return msg["content"]
-        return None
-
     def stop_speaking(self) -> None:
         """Immediately stop TTS playback (thread-safe, for barge-in)."""
         self._streaming_tts.stop()
@@ -636,7 +569,8 @@ class Orchestrator:
         self._context.clear()
 
     def stop(self) -> None:
-        """Shut down background systems (heartbeat scheduler)."""
+        """Shut down background systems (heartbeat scheduler, session)."""
+        self._context.end_session()
         self._heartbeat_scheduler.stop()
 
     def set_ambient_fn(self, fn: Callable[[], float]) -> None:
@@ -712,30 +646,35 @@ class Orchestrator:
                 "Jangan tambahkan apapun selain itu."
             )
 
-        # Use LLM to generate natural wording, then TTS
-        try:
-            provider = self._llm_router.providers[0]
-            start = time.perf_counter()
-            sentence_stream = provider.generate_stream(
-                prompt, context=[], tools=None,
-            )
-            full_text, tts_time = await self._streaming_tts.stream_from_llm(
-                sentence_stream, self._tts_router, language="auto",
-            )
-            elapsed = time.perf_counter() - start
-            logger.info(
-                "Notification delivered: %.2fs (TTS: %.2fs) — %r",
-                elapsed, tts_time, (full_text or "")[:80],
-            )
-            return full_text or prompt
-        except Exception:
-            logger.exception("Failed to deliver notification via LLM+TTS")
-            # Fallback: just speak the raw message
+        # Use LLM to generate natural wording, then TTS (with failover)
+        for provider in self._llm_router.providers:
             try:
-                await self.speak(notification.message)
+                start = time.perf_counter()
+                sentence_stream = provider.generate_stream(
+                    prompt, context=[], tools=None,
+                )
+                full_text, tts_time = await self._streaming_tts.stream_from_llm(
+                    sentence_stream, self._tts_router, language="auto",
+                )
+                elapsed = time.perf_counter() - start
+                logger.info(
+                    "Notification delivered: %.2fs (TTS: %.2fs) — %r",
+                    elapsed, tts_time, (full_text or "")[:80],
+                )
+                return full_text or prompt
             except Exception:
-                logger.warning("TTS fallback also failed", exc_info=True)
-            return notification.message
+                logger.warning(
+                    "Notification delivery via %s failed, trying next",
+                    provider.name, exc_info=True,
+                )
+                continue
+        logger.error("All LLM providers failed for notification delivery")
+        # Fallback: just speak the raw message
+        try:
+            await self.speak(notification.message)
+        except Exception:
+            logger.warning("TTS fallback also failed", exc_info=True)
+        return notification.message
 
     async def check_providers(self) -> dict[str, dict[str, bool | str]]:
         """Check connectivity to all providers, mic, and audio player.

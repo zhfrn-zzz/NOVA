@@ -186,7 +186,7 @@ async def _check_text_notifications(orchestrator) -> None:
     PASSIVE and GENTLE notifications are handled by the orchestrator
     (injected into LLM context on next interaction).
     """
-    from nova.heartbeat.queue import Urgency
+    from nova.heartbeat.queue import Notification, Urgency
 
     queue = orchestrator.notification_queue
     if not queue.has_urgent():
@@ -200,9 +200,16 @@ async def _check_text_notifications(orchestrator) -> None:
         return
 
     if notif.urgency != Urgency.ACTIVE:
-        # Not ACTIVE — put it back for orchestrator to handle via context
-        notif.urgency = Urgency.PASSIVE
-        queue.push(notif)
+        # Not ACTIVE — put it back as PASSIVE for orchestrator to handle via context
+        downgraded = Notification(
+            message=notif.message,
+            urgency=Urgency.PASSIVE,
+            source=notif.source,
+            created_at=notif.created_at,
+            reminder_id=notif.reminder_id,
+            action=notif.action,
+        )
+        queue.push(downgraded)
         return
 
     # Format ACTIVE notification for console display

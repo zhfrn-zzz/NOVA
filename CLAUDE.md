@@ -89,15 +89,11 @@ nova/
 │       │   ├── router.py         # Failover logic + smart routing
 │       │   ├── stt/
 │       │   │   ├── __init__.py
-│       │   │   ├── groq_whisper.py
-│       │   │   ├── google_stt.py
-│       │   │   └── cloudflare_stt.py
+│       │   │   └── groq_whisper.py
 │       │   ├── llm/
 │       │   │   ├── __init__.py
 │       │   │   ├── gemini.py
-│       │   │   ├── groq_llm.py
-│       │   │   ├── cloudflare_llm.py
-│       │   │   └── openrouter.py
+│       │   │   └── groq_llm.py
 │       │   └── tts/
 │       │       ├── __init__.py
 │       │       ├── google_cloud_tts.py  # Google Cloud TTS (Chirp 3 HD, primary)
@@ -113,8 +109,7 @@ nova/
 │       ├── messaging/
 │       │   ├── __init__.py
 │       │   ├── telegram_bot.py   # Telegram bot (aiogram, in-process async task)
-│       │   ├── whatsapp_client.py # WhatsApp bridge client (HTTP to wa-bridge Node.js)
-│       │   └── formatter.py      # Response formatting per messaging platform
+│       │   └── whatsapp_client.py # WhatsApp bridge client (HTTP to wa-bridge Node.js)
 │       ├── iot/
 │       │   ├── __init__.py
 │       │   ├── tuya_cloud.py     # Tuya Cloud IR driver (AC, TV remote)
@@ -150,7 +145,6 @@ nova/
 │       └── utils/
 │           ├── __init__.py
 │           ├── logger.py
-│           ├── audio_utils.py
 │           └── tts_quota.py          # Google TTS monthly quota tracker
 ├── tests/
 │   ├── test_orchestrator.py

@@ -7,6 +7,7 @@ by checking file mtime — no restart needed to change NOVA's personality.
 
 import datetime
 import logging
+import threading
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -124,6 +125,9 @@ class PromptAssembler:
 
         # Interaction mode: "voice" (default) or "text" (messaging)
         self._interaction_mode: str = "voice"
+
+        # Lock for thread-safe set→build→consume cycle
+        self._build_lock = threading.Lock()
 
         # Ensure directory and defaults exist
         self._ensure_defaults()
@@ -290,6 +294,33 @@ class PromptAssembler:
             mode: "voice" for TTS output, "text" for messaging platforms.
         """
         self._interaction_mode = mode
+
+    def build_with_context(
+        self,
+        *,
+        memory_context: str = "",
+        notification_context: str = "",
+        mode: str = "voice",
+    ) -> str:
+        """Thread-safe build with per-request context.
+
+        Atomically sets memory/notification/mode context and builds the
+        system prompt, preventing interleaving from concurrent callers
+        (voice, Telegram, WhatsApp).
+
+        Args:
+            memory_context: Relevant memories from hybrid search.
+            notification_context: Pending heartbeat notifications.
+            mode: "voice" or "text" interaction mode.
+
+        Returns:
+            Complete system prompt string.
+        """
+        with self._build_lock:
+            self._pending_memory_context = memory_context
+            self._pending_notification_context = notification_context
+            self._interaction_mode = mode
+            return self.build()
 
     @staticmethod
     def _adapt_rules_for_text(rules: str) -> str:

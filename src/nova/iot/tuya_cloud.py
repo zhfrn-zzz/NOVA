@@ -11,12 +11,8 @@ import os
 from pathlib import Path
 
 import tinytuya
-from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
-
-# Load .env so TUYA_* vars are available via os.environ
-load_dotenv(Path(__file__).resolve().parents[3] / ".env")
 
 # Device IDs
 _IR_HUB_ID = "a37d9677a6a3498269xabd"
@@ -78,6 +74,15 @@ class TuyaCloudDriver:
     def _get_cloud(self) -> tinytuya.Cloud:
         """Lazy-init the tinytuya Cloud client."""
         if self._cloud is None:
+            from dotenv import load_dotenv
+            load_dotenv(Path(__file__).resolve().parents[3] / ".env")
+
+            # Re-read env vars after load_dotenv (in case they weren't set before)
+            if not self._access_id:
+                self._access_id = os.environ.get("TUYA_ACCESS_ID", "")
+            if not self._access_key:
+                self._access_key = os.environ.get("TUYA_ACCESS_KEY", "")
+
             if not self._access_id or not self._access_key:
                 raise RuntimeError("TUYA_ACCESS_ID dan TUYA_ACCESS_KEY belum diset.")
             self._cloud = tinytuya.Cloud(

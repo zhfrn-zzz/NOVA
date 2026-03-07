@@ -1,0 +1,238 @@
+# NOVA Codebase Audit — Implementation Plan
+
+## Context
+
+Full codebase audit identified 6 critical bugs, 8 dead code items, 6 reliability issues, and 4 performance opportunities. This plan fixes them in priority order across 4 phases. **No features removed, no behavior changes** — only bug fixes, dead code cleanup, and reliability improvements.
+
+---
+
+## Phase 1: Critical Bugs (must fix)
+
+### 1.1 Sleep reminder never fires (scheduler quiet-hours boundary)
+**File:** `src/nova/heartbeat/scheduler.py:164-182`
+**Bug:** `_is_quiet(now)` returns True at hour 23 (default quiet_hours_start=23), so the `not self._is_quiet(now)` guard prevents the sleep reminder from ever being queued.
+**Fix:** Remove the `_is_quiet()` guard from the sleep reminder — it IS the boundary notification:
+```python
+# Line 166-182: Remove the `if not self._is_quiet(now):` wrapper.
+# The push should happen unconditionally when hour==23 and not reminded.
+if (
+    self._config.sleep_reminder_enabled
+    and hour == 23
+    and not self._sleep_reminded
+):
+    self._queue.push(Notification(
+        message="__sleep_reminder__",
+        urgency=Urgency.GENTLE,
+        source="rule",
+        created_at=now,
+    ))
+    self._sleep_reminded = True
+```
+
+### 1.2 Streaming path bypasses router failover
+**File:** `src/nova/orchestrator.py:303-328`
+**Bug:** `_respond()` calls `self._llm_router.providers[0].generate_stream()` directly, skipping router failover. If Gemini is rate-limited, Groq streaming is never tried.
+**Fix:** Loop through providers manually with try/except:
+```python
+async def _respond(self, user_input):
+    # ... existing memory/notification injection ...
+    context = self._context.get_context()
+
+    for provider in self._llm_router.providers:
+        try:
+            start = time.perf_counter()
+            sentence_stream = provider.generate_stream(
+                user_input, context, tools=self._tools,
+            )
+            full_text, tts_time = await self._streaming_tts.stream_from_llm(
+                sentence_stream, self._tts_router, language="auto",
+            )
+            # ... rest of success path unchanged ...
+            return full_text, total
+        except Exception:
+            logger.warning("Streaming via %s failed, trying next", provider.name, exc_info=True)
+            continue
+    return None  # all providers failed
+```
+
+### 1.3 `deliver_notification()` bypasses router — same fix pattern
+**File:** `src/nova/orchestrator.py:715-730`
+**Fix:** Same pattern as 1.2 — loop through providers instead of `providers[0]`.
+
+### 1.4 PromptAssembler race condition — pass context as params
+**File:** `src/nova/memory/prompt_assembler.py`
+**Bug:** Singleton stores per-request state (`_pending_memory_context`, `_pending_notification_context`, `_interaction_mode`) that races with concurrent Telegram/WhatsApp/voice.
+**Fix:** Change `build()` signature to accept all dynamic context as parameters. Remove `set_memory_context()`, `set_notification_context()`, `set_interaction_mode()` methods. Update all callers.
+
+Changes needed in:
+- `prompt_assembler.py`: Remove the 3 set_* methods and the 3 instance vars. Add params to `build()`:
+  ```python
+  def build(self, *, memory_context="", notification_context="", mode="voice"):
+  ```
+- `orchestrator.py`: Update `_respond()`, `_respond_text_only()`, `process_text()`, `deliver_notification()` to pass context directly to `build()`. The `_build_system_prompt()` in gemini.py and groq_llm.py also calls `get_prompt_assembler().build()` — these need the context threaded through.
+- `gemini.py` and `groq_llm.py`: The `_build_system_prompt()` module-level function needs to accept and forward the dynamic context, or the system prompt building needs to move to the orchestrator.
+
+**Approach:** The simplest fix that doesn't restructure everything: keep `set_*` methods but make them store context in a thread-local or pass-through dict keyed by request, OR (simpler) just thread `memory_context`, `notification_context`, and `mode` through the `generate()`/`generate_stream()` calls down to `_build_system_prompt()`.
+
+**Chosen approach:** Keep existing architecture but make `_build_system_prompt()` in both providers accept optional overrides via a context dict stored on the assembler with a lock. This is minimal change. Actually, the cleanest minimal fix: build the system prompt in the orchestrator and pass it to generate() as a pre-built string parameter. But generate() doesn't accept a system prompt param currently.
+
+**Simplest safe fix:** Add a threading.Lock to PromptAssembler around the set→build→consume cycle. Each caller: lock → set → build → unlock. This prevents interleaving without changing any signatures.
+
+```python
+# prompt_assembler.py
+import threading
+
+class PromptAssembler:
+    def __init__(self, ...):
+        ...
+        self._build_lock = threading.Lock()
+
+    def build_with_context(
+        self, *, memory_context="", notification_context="", mode="voice"
+    ) -> str:
+        """Thread-safe build with per-request context."""
+        with self._build_lock:
+            self._pending_memory_context = memory_context
+            self._pending_notification_context = notification_context
+            self._interaction_mode = mode
+            return self.build()
+```
+
+Then update callers to use `build_with_context()` directly instead of separate set+build calls.
+
+### 1.5 Backfill ensure_future without try/except
+**File:** `src/nova/orchestrator.py:128-129`
+**Fix:** Wrap in try/except RuntimeError like the TTS warmup 3 lines above:
+```python
+if self._embedding_fn:
+    try:
+        asyncio.ensure_future(self._backfill_startup())
+    except RuntimeError:
+        pass
+```
+
+### 1.6 streaming_tts consumer can hang if producer fails before yielding
+**File:** `src/nova/audio/streaming_tts.py:466-477`
+**Fix:** Add a safety timeout on the consumer's first `sentence_queue.get()` and ensure the producer task's exception propagates:
+```python
+# After creating both tasks, await with proper error propagation
+done, pending = await asyncio.wait(
+    [producer_task, consumer_task],
+    return_when=asyncio.FIRST_COMPLETED,
+)
+# If producer finished first (error), cancel consumer
+if producer_task in done and consumer_task in pending:
+    consumer_task.cancel()
+    # Re-raise producer exception
+    producer_task.result()
+```
+Alternative (simpler): just ensure `producer()` always sends None sentinel even on exception — verify the existing `finally` block covers all paths. Actually, looking at the code again, the `finally` at line 401-405 does `sentence_queue.put_nowait(None)` which should work. The real issue is if `generate_stream()` constructor itself raises before entering the `async for` loop. Let me verify... The `producer()` wraps the entire `async for sentence in sentence_stream` in a try/finally, so even if the iterator raises on first `__anext__`, the finally fires. This is actually safe. **Downgrade to non-critical.** Just add a comment noting why it's safe.
+
+---
+
+## Phase 2: Dead Code Cleanup
+
+### 2.1 Remove legacy tool aliases
+**File:** `src/nova/tools/registry.py`
+- Delete lines 15-16 (imports of `recall_facts`, `remember_fact`)
+- Delete lines 900-902 (`"remember_fact"` and `"recall_facts"` entries)
+
+### 2.2 Remove `last_transcript` property
+**File:** `src/nova/orchestrator.py:577-584`
+- Delete the `last_transcript` property
+
+### 2.3 Remove `handle_voice_interaction()` method
+**File:** `src/nova/orchestrator.py:503-575`
+- Delete the entire method (never called, superseded by capture_and_transcribe + handle_interaction)
+
+### 2.4 Remove unused config fields
+**File:** `src/nova/config.py`
+- Delete `cache_ttl_hours` (line 62)
+- Delete `stt_providers`, `llm_providers`, `tts_providers` (lines 33-35)
+- Delete `max_context_turns` (line 43)
+- Delete `compaction_threshold`, `max_conversation_turns` (lines 68-69)
+- Delete `prompts_dir`, `memory_db_path` (lines 66-67) — hardcoded elsewhere
+
+### 2.5 Delete `messaging/formatter.py`
+**File:** `src/nova/messaging/formatter.py`
+- Identity functions, never imported. Delete file.
+
+### 2.6 Update CLAUDE.md project structure
+- Remove references to non-existent files: `google_stt.py`, `cloudflare_stt.py`, `cloudflare_llm.py`, `openrouter.py`
+- Remove `utils/audio_utils.py` (doesn't exist)
+
+---
+
+## Phase 3: Reliability Issues
+
+### 3.1 SQLite thread-safety lock
+**File:** `src/nova/memory/memory_store.py`
+- Add `self._lock = threading.Lock()` in `__init__`
+- Wrap all write methods (store_memory, log_interaction, start_session, end_session, mark_reminder_delivered, cancel_reminder, add_reminder, store_embedding, backfill commit) with `with self._lock:`
+- Read methods are safe in WAL mode without locking
+
+### 3.2 Wire up session lifecycle
+**File:** `src/nova/orchestrator.py`
+- In `stop()` method, add `self._context.end_session()` before stopping heartbeat
+
+### 3.3 Move `load_dotenv()` from module level
+**File:** `src/nova/iot/tuya_cloud.py:19`
+- Move `load_dotenv()` into `_get_cloud()` method (lazy init)
+
+### 3.4 Fix GENTLE notification downgrade mutation
+**File:** `src/nova/main.py:186-189`
+- Create a new Notification with PASSIVE urgency instead of mutating the dequeued one
+
+### 3.5 Fix fallback double-retrieval
+**File:** `src/nova/orchestrator.py:330-350`
+- `_respond_fallback()` calls `process_text()` which re-retrieves memory and re-injects notifications. Since `_respond()` already did this, the fallback gets stale/empty context.
+- Fix: make `_respond_fallback()` inline the LLM call using the already-prepared context, instead of calling `process_text()` which re-does everything.
+
+### 3.6 Reuse httpx client in Groq provider
+**File:** `src/nova/providers/llm/groq_llm.py`
+- Create `self._client = httpx.AsyncClient(timeout=self._timeout)` in `__init__`
+- Reuse in `generate()` and `generate_stream()` instead of `async with httpx.AsyncClient() as client:`
+- Add cleanup in a close method (or just let it be — httpx clients are safe to not close in daemon processes)
+
+---
+
+## Phase 4: Performance & Cleanup
+
+### 4.1 Replace polling loop with asyncio.wait in TTS playback
+**File:** `src/nova/audio/streaming_tts.py:196-210`
+- Replace the `while not wait_task.done() / sleep(0.05)` loop with proper asyncio.wait + stop-flag event
+
+---
+
+## Verification
+
+After each phase:
+1. `ruff check src/` — no lint errors
+2. `pytest tests/` — all existing tests pass
+3. Manual check: text mode still works (`python -m nova.main --text-only`)
+
+Key tests to verify:
+- `test_heartbeat_scheduler.py` — sleep reminder now fires at hour 23
+- `test_prompt_assembler.py` — build_with_context works, thread safety
+- `test_router.py` — failover still works
+- `test_streaming_tts.py` — streaming pipeline unchanged
+- `test_messaging.py` — concurrent message handling
+- `test_iot.py` — IoT tools unaffected
+
+## File Change Summary
+
+| File | Changes |
+|------|---------|
+| `src/nova/heartbeat/scheduler.py` | Fix sleep reminder guard |
+| `src/nova/orchestrator.py` | Fix streaming failover, fix deliver_notification, fix ensure_future, wire end_session, fix fallback double-retrieval, remove dead methods |
+| `src/nova/memory/prompt_assembler.py` | Add build_with_context() with lock, keep old methods for compat |
+| `src/nova/providers/llm/gemini.py` | Thread system prompt from orchestrator |
+| `src/nova/providers/llm/groq_llm.py` | Thread system prompt, reuse httpx client |
+| `src/nova/tools/registry.py` | Remove legacy aliases |
+| `src/nova/config.py` | Remove unused fields |
+| `src/nova/memory/memory_store.py` | Add threading.Lock for writes |
+| `src/nova/iot/tuya_cloud.py` | Move load_dotenv to lazy init |
+| `src/nova/main.py` | Fix notification mutation |
+| `src/nova/messaging/formatter.py` | DELETE |
+| `src/nova/audio/streaming_tts.py` | Replace polling loop |
+| `CLAUDE.md` | Update project structure |

@@ -4,8 +4,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from nova.messaging.formatter import format_for_telegram, format_for_whatsapp
-
 # ---------------------------------------------------------------------------
 # Telegram Bot Tests
 # ---------------------------------------------------------------------------
@@ -154,23 +152,6 @@ class TestWhatsAppClient:
         client, _ = self._make_client()
         result = await client.send_message("628123456789", "hello")
         assert result is False
-
-
-# ---------------------------------------------------------------------------
-# Formatter Tests
-# ---------------------------------------------------------------------------
-
-
-class TestFormatter:
-    """Test response formatting functions."""
-
-    def test_format_for_telegram_passthrough(self):
-        text = "AC sudah dinyalakan di suhu 24 derajat."
-        assert format_for_telegram(text) == text
-
-    def test_format_for_whatsapp_passthrough(self):
-        text = "Besok diprediksi hujan dengan kemungkinan 80%."
-        assert format_for_whatsapp(text) == text
 
 
 # ---------------------------------------------------------------------------

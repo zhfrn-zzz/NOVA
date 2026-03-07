@@ -162,22 +162,20 @@ class HeartbeatScheduler:
             logger.debug("Morning greeting queued")
 
         # Sleep reminder (23:00, once per night)
+        # Fires unconditionally — this IS the boundary notification.
+        # The _is_quiet() guard must NOT wrap this; quiet_hours_start=23
+        # would suppress the very reminder it's meant to deliver.
         if (
             self._config.sleep_reminder_enabled
             and hour == 23
             and not self._sleep_reminded
         ):
-            if not self._is_quiet(now):
-                # Only remind if not already in quiet mode
-                # (quiet hours start at 23 by default, but this fires
-                #  at the boundary hour before quiet check takes effect
-                #  for non-alarm items)
-                self._queue.push(Notification(
-                    message="__sleep_reminder__",
-                    urgency=Urgency.GENTLE,
-                    source="rule",
-                    created_at=now,
-                ))
+            self._queue.push(Notification(
+                message="__sleep_reminder__",
+                urgency=Urgency.GENTLE,
+                source="rule",
+                created_at=now,
+            ))
             self._sleep_reminded = True
             logger.debug("Sleep reminder queued")
 

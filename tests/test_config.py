@@ -31,16 +31,8 @@ class TestNovaConfigDefaults:
         assert config.stt_timeout == 10.0
         assert config.llm_timeout == 15.0
         assert config.tts_timeout == 10.0
-        assert config.max_context_turns == 10
         assert config.default_language == "auto"
         assert config.log_level == "INFO"
-        assert config.cache_ttl_hours == 24
-
-    def test_default_provider_priorities(self):
-        config = NovaConfig()
-        assert config.stt_providers == ["groq", "cloudflare"]
-        assert config.llm_providers == ["gemini", "groq", "cloudflare"]
-        assert config.tts_providers == ["edge", "cloudflare"]
 
     @pytest.mark.usefixtures("_clean_env")
     def test_default_api_keys_are_empty(self):

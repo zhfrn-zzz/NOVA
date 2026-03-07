@@ -11,6 +11,7 @@ import logging
 import re
 import sqlite3
 import struct
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -184,6 +185,9 @@ class MemoryStore:
         # Optional async embedding function: async fn(text) -> list[float] | None
         self._embedding_fn = None
 
+        # Thread-safety lock for write operations
+        self._lock = threading.Lock()
+
         self._init_schema()
         self._migrate_reminders_action()
         self._migrate_legacy_json()
@@ -280,22 +284,24 @@ class MemoryStore:
         value = value.strip()
         now = datetime.now().isoformat()
 
-        existing = self._conn.execute(
-            "SELECT id FROM memories WHERE key = ?", (key,),
-        ).fetchone()
+        with self._lock:
+            existing = self._conn.execute(
+                "SELECT id FROM memories WHERE key = ?", (key,),
+            ).fetchone()
 
-        if existing:
-            self._conn.execute(
-                "UPDATE memories SET value=?, source=?, updated_at=? WHERE key=?",
-                (value, source, now, key),
-            )
-        else:
-            self._conn.execute(
-                "INSERT INTO memories (key, value, source, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (key, value, source, now, now),
-            )
-        self._conn.commit()
+            if existing:
+                self._conn.execute(
+                    "UPDATE memories SET value=?, source=?, updated_at=? WHERE key=?",
+                    (value, source, now, key),
+                )
+            else:
+                self._conn.execute(
+                    "INSERT INTO memories (key, value, source, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (key, value, source, now, now),
+                )
+            self._conn.commit()
+
         self._sync_memory_md()
         logger.info("Memory stored: %s=%s (source=%s)", key, value, source)
 
@@ -313,11 +319,12 @@ class MemoryStore:
             vec = await self._embedding_fn(value)
             if vec is not None:
                 blob = struct.pack(f"{len(vec)}f", *vec)
-                self._conn.execute(
-                    "UPDATE memories SET embedding = ? WHERE key = ?",
-                    (blob, key),
-                )
-                self._conn.commit()
+                with self._lock:
+                    self._conn.execute(
+                        "UPDATE memories SET embedding = ? WHERE key = ?",
+                        (blob, key),
+                    )
+                    self._conn.commit()
                 logger.info("Embedded memory: %s (%d dimensions)", key, len(vec))
         except Exception:
             logger.warning("Failed to embed memory %s", key, exc_info=True)
@@ -358,10 +365,11 @@ class MemoryStore:
             True if the memory existed and was removed.
         """
         key = key.strip().lower()
-        cursor = self._conn.execute(
-            "DELETE FROM memories WHERE key = ?", (key,),
-        )
-        self._conn.commit()
+        with self._lock:
+            cursor = self._conn.execute(
+                "DELETE FROM memories WHERE key = ?", (key,),
+            )
+            self._conn.commit()
         if cursor.rowcount > 0:
             self._sync_memory_md()
             logger.info("Memory deleted: %s", key)
@@ -428,19 +436,21 @@ class MemoryStore:
             The row ID of the inserted interaction.
         """
         now = datetime.now()
-        cursor = self._conn.execute(
-            "INSERT INTO interactions (date, role, content, tool_calls, tokens_est, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (
-                now.strftime("%Y-%m-%d"),
-                role,
-                content,
-                json.dumps(tool_calls) if tool_calls else None,
-                len(content) // 4,
-                now.isoformat(),
-            ),
-        )
-        self._conn.commit()
+        with self._lock:
+            cursor = self._conn.execute(
+                "INSERT INTO interactions "
+                "(date, role, content, tool_calls, tokens_est, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    now.strftime("%Y-%m-%d"),
+                    role,
+                    content,
+                    json.dumps(tool_calls) if tool_calls else None,
+                    len(content) // 4,
+                    now.isoformat(),
+                ),
+            )
+            self._conn.commit()
         return cursor.lastrowid
 
     def get_recent_interactions(
@@ -513,10 +523,11 @@ class MemoryStore:
     def start_session(self) -> int:
         """Start a new session and return its ID."""
         now = datetime.now().isoformat()
-        cursor = self._conn.execute(
-            "INSERT INTO sessions (started_at) VALUES (?)", (now,),
-        )
-        self._conn.commit()
+        with self._lock:
+            cursor = self._conn.execute(
+                "INSERT INTO sessions (started_at) VALUES (?)", (now,),
+            )
+            self._conn.commit()
         return cursor.lastrowid
 
     def end_session(
@@ -524,11 +535,12 @@ class MemoryStore:
     ) -> None:
         """End a session with optional summary."""
         now = datetime.now().isoformat()
-        self._conn.execute(
-            "UPDATE sessions SET ended_at=?, summary=?, token_count=? WHERE id=?",
-            (now, summary, token_count, session_id),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "UPDATE sessions SET ended_at=?, summary=?, token_count=? WHERE id=?",
+                (now, summary, token_count, session_id),
+            )
+            self._conn.commit()
 
     # --- Embedding support ---
 
@@ -540,11 +552,12 @@ class MemoryStore:
             embedding: List of float values (e.g. 768-dim vector).
         """
         blob = struct.pack(f"{len(embedding)}f", *embedding)
-        self._conn.execute(
-            "UPDATE memories SET embedding = ? WHERE key = ?",
-            (blob, key.strip().lower()),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "UPDATE memories SET embedding = ? WHERE key = ?",
+                (blob, key.strip().lower()),
+            )
+            self._conn.commit()
 
     def get_memories_with_embeddings(self) -> list[dict]:
         """Get all memories that have embeddings stored.
@@ -598,11 +611,12 @@ class MemoryStore:
                 vec = await fn(row["value"])
                 if vec is not None:
                     blob = struct.pack(f"{len(vec)}f", *vec)
-                    self._conn.execute(
-                        "UPDATE memories SET embedding = ? WHERE key = ?",
-                        (blob, row["key"]),
-                    )
-                    self._conn.commit()
+                    with self._lock:
+                        self._conn.execute(
+                            "UPDATE memories SET embedding = ? WHERE key = ?",
+                            (blob, row["key"]),
+                        )
+                        self._conn.commit()
                     count += 1
             except Exception:
                 logger.warning(
@@ -660,14 +674,15 @@ class MemoryStore:
         """
         now = datetime.now().isoformat()
         action_json = json.dumps(action) if action else None
-        cursor = self._conn.execute(
-            "INSERT INTO reminders "
-            "(message, remind_at, lead_time, is_alarm, urgency, recurring, "
-            "action_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (message, remind_at, lead_time, int(is_alarm), urgency,
-             recurring, action_json, now),
-        )
-        self._conn.commit()
+        with self._lock:
+            cursor = self._conn.execute(
+                "INSERT INTO reminders "
+                "(message, remind_at, lead_time, is_alarm, urgency, recurring, "
+                "action_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (message, remind_at, lead_time, int(is_alarm), urgency,
+                 recurring, action_json, now),
+            )
+            self._conn.commit()
         logger.info(
             "Reminder added (#%d): '%s' at %s",
             cursor.lastrowid, message, remind_at,
@@ -725,11 +740,12 @@ class MemoryStore:
             reminder_id: ID of the reminder to mark.
         """
         now = datetime.now().isoformat()
-        self._conn.execute(
-            "UPDATE reminders SET delivered = 1, delivered_at = ? WHERE id = ?",
-            (now, reminder_id),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "UPDATE reminders SET delivered = 1, delivered_at = ? WHERE id = ?",
+                (now, reminder_id),
+            )
+            self._conn.commit()
 
     def cancel_reminder(self, reminder_id: int) -> bool:
         """Cancel (delete) a reminder by ID.
@@ -740,10 +756,11 @@ class MemoryStore:
         Returns:
             True if the reminder was found and deleted.
         """
-        cursor = self._conn.execute(
-            "DELETE FROM reminders WHERE id = ?", (reminder_id,),
-        )
-        self._conn.commit()
+        with self._lock:
+            cursor = self._conn.execute(
+                "DELETE FROM reminders WHERE id = ?", (reminder_id,),
+            )
+            self._conn.commit()
         if cursor.rowcount > 0:
             logger.info("Reminder #%d cancelled", reminder_id)
             return True

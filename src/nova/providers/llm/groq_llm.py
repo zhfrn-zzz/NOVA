@@ -138,6 +138,13 @@ class GroqLLMProvider(LLMProvider):
         config = get_config()
         self._api_key = config.groq_api_key
         self._timeout = config.llm_timeout
+        self._client: httpx.AsyncClient | None = None
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Get or create the persistent httpx client."""
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(timeout=self._timeout)
+        return self._client
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -172,54 +179,54 @@ class GroqLLMProvider(LLMProvider):
 
         try:
             tool_call_count = 0
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                while tool_call_count <= _MAX_TOOL_CALLS:
-                    payload: dict = {
-                        "model": _MODEL,
-                        "messages": messages,
-                        "temperature": 0.7,
-                        "max_tokens": 512,
-                    }
-                    if openai_tools:
-                        payload["tools"] = openai_tools
-                        payload["tool_choice"] = "auto"
+            client = await self._get_client()
+            while tool_call_count <= _MAX_TOOL_CALLS:
+                payload: dict = {
+                    "model": _MODEL,
+                    "messages": messages,
+                    "temperature": 0.7,
+                    "max_tokens": 512,
+                }
+                if openai_tools:
+                    payload["tools"] = openai_tools
+                    payload["tool_choice"] = "auto"
 
-                    response = await client.post(
-                        _GROQ_CHAT_URL, headers=self._headers(), json=payload,
+                response = await client.post(
+                    _GROQ_CHAT_URL, headers=self._headers(), json=payload,
+                )
+                _check_response_status(self.name, response)
+
+                data = response.json()
+                message = data["choices"][0]["message"]
+
+                # Check for tool calls
+                if message.get("tool_calls"):
+                    tool_call_count += 1
+                    tool_calls = message["tool_calls"]
+                    logger.info(
+                        "Groq function call round #%d: %d tool(s)",
+                        tool_call_count, len(tool_calls),
                     )
-                    _check_response_status(self.name, response)
 
-                    data = response.json()
-                    message = data["choices"][0]["message"]
+                    # Add assistant message with tool_calls to history
+                    messages.append({
+                        "role": "assistant",
+                        "content": message.get("content") or "",
+                        "tool_calls": tool_calls,
+                    })
 
-                    # Check for tool calls
-                    if message.get("tool_calls"):
-                        tool_call_count += 1
-                        tool_calls = message["tool_calls"]
-                        logger.info(
-                            "Groq function call round #%d: %d tool(s)",
-                            tool_call_count, len(tool_calls),
-                        )
+                    # Execute tools and add results
+                    tool_results = await _execute_tool_calls(tool_calls)
+                    messages.extend(tool_results)
+                    continue
 
-                        # Add assistant message with tool_calls to history
-                        messages.append({
-                            "role": "assistant",
-                            "content": message.get("content") or "",
-                            "tool_calls": tool_calls,
-                        })
+                # No tool calls — return text response
+                text = (message.get("content") or "").strip()
+                if not text:
+                    raise ProviderError(self.name, "Groq returned empty response")
 
-                        # Execute tools and add results
-                        tool_results = await _execute_tool_calls(tool_calls)
-                        messages.extend(tool_results)
-                        continue
-
-                    # No tool calls — return text response
-                    text = (message.get("content") or "").strip()
-                    if not text:
-                        raise ProviderError(self.name, "Groq returned empty response")
-
-                    logger.debug("Groq LLM: generated %d chars", len(text))
-                    return text
+                logger.debug("Groq LLM: generated %d chars", len(text))
+                return text
 
             # Exhausted tool call rounds
             raise ProviderError(self.name, f"Exceeded {_MAX_TOOL_CALLS} tool call rounds")
@@ -256,104 +263,104 @@ class GroqLLMProvider(LLMProvider):
         tool_call_count = 0
 
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                while tool_call_count <= _MAX_TOOL_CALLS:
-                    payload: dict = {
-                        "model": _MODEL,
-                        "messages": messages,
-                        "temperature": 0.7,
-                        "max_tokens": 512,
-                        "stream": True,
-                    }
-                    if openai_tools:
-                        payload["tools"] = openai_tools
-                        payload["tool_choice"] = "auto"
+            client = await self._get_client()
+            while tool_call_count <= _MAX_TOOL_CALLS:
+                payload: dict = {
+                    "model": _MODEL,
+                    "messages": messages,
+                    "temperature": 0.7,
+                    "max_tokens": 512,
+                    "stream": True,
+                }
+                if openai_tools:
+                    payload["tools"] = openai_tools
+                    payload["tool_choice"] = "auto"
 
-                    # Accumulate tool calls from streaming deltas
-                    accumulated_tool_calls: dict[int, dict] = {}
+                # Accumulate tool calls from streaming deltas
+                accumulated_tool_calls: dict[int, dict] = {}
 
-                    async with client.stream(
-                        "POST", _GROQ_CHAT_URL,
-                        headers=self._headers(), json=payload,
-                    ) as response:
-                        if response.status_code == 429:
-                            retry_after = _parse_retry_after_header(response)
-                            raise RateLimitError(self.name, retry_after=retry_after)
-                        if response.status_code != 200:
-                            body = await response.aread()
-                            raise ProviderError(
-                                self.name,
-                                f"API error {response.status_code}: {body.decode()}",
-                            )
-
-                        async for line in response.aiter_lines():
-                            if not line.startswith("data: "):
-                                continue
-                            data_str = line[6:]
-                            if data_str.strip() == "[DONE]":
-                                break
-                            try:
-                                data = json.loads(data_str)
-                                delta = data["choices"][0].get("delta", {})
-                            except (json.JSONDecodeError, KeyError, IndexError):
-                                continue
-
-                            # Accumulate tool calls from delta
-                            if "tool_calls" in delta:
-                                for tc_delta in delta["tool_calls"]:
-                                    idx = tc_delta["index"]
-                                    fn_d = tc_delta.get("function", {})
-                                    if idx not in accumulated_tool_calls:
-                                        accumulated_tool_calls[idx] = {
-                                            "id": tc_delta.get("id", ""),
-                                            "function": {
-                                                "name": fn_d.get("name", ""),
-                                                "arguments": "",
-                                            },
-                                        }
-                                    else:
-                                        if tc_delta.get("id"):
-                                            accumulated_tool_calls[idx]["id"] = tc_delta["id"]
-                                        if fn_d.get("name"):
-                                            acc_fn = accumulated_tool_calls[idx]["function"]
-                                            acc_fn["name"] = fn_d["name"]
-                                    # Append argument chunks
-                                    if fn_d.get("arguments"):
-                                        acc_fn = accumulated_tool_calls[idx]["function"]
-                                        acc_fn["arguments"] += fn_d["arguments"]
-
-                            # Yield text content
-                            content = delta.get("content", "")
-                            if content:
-                                yield content
-
-                    # After stream ends: check if we got tool calls
-                    if accumulated_tool_calls:
-                        tool_call_count += 1
-                        tool_calls_list = [
-                            accumulated_tool_calls[i]
-                            for i in sorted(accumulated_tool_calls)
-                        ]
-                        logger.info(
-                            "Groq stream tool call round #%d: %d tool(s)",
-                            tool_call_count, len(tool_calls_list),
+                async with client.stream(
+                    "POST", _GROQ_CHAT_URL,
+                    headers=self._headers(), json=payload,
+                ) as response:
+                    if response.status_code == 429:
+                        retry_after = _parse_retry_after_header(response)
+                        raise RateLimitError(self.name, retry_after=retry_after)
+                    if response.status_code != 200:
+                        body = await response.aread()
+                        raise ProviderError(
+                            self.name,
+                            f"API error {response.status_code}: {body.decode()}",
                         )
 
-                        # Add assistant message with tool_calls
-                        messages.append({
-                            "role": "assistant",
-                            "content": "",
-                            "tool_calls": tool_calls_list,
-                        })
+                    async for line in response.aiter_lines():
+                        if not line.startswith("data: "):
+                            continue
+                        data_str = line[6:]
+                        if data_str.strip() == "[DONE]":
+                            break
+                        try:
+                            data = json.loads(data_str)
+                            delta = data["choices"][0].get("delta", {})
+                        except (json.JSONDecodeError, KeyError, IndexError):
+                            continue
 
-                        # Execute tools and add results
-                        tool_results = await _execute_tool_calls(tool_calls_list)
-                        messages.extend(tool_results)
-                        # Continue loop → new stream with tool results
-                        continue
+                        # Accumulate tool calls from delta
+                        if "tool_calls" in delta:
+                            for tc_delta in delta["tool_calls"]:
+                                idx = tc_delta["index"]
+                                fn_d = tc_delta.get("function", {})
+                                if idx not in accumulated_tool_calls:
+                                    accumulated_tool_calls[idx] = {
+                                        "id": tc_delta.get("id", ""),
+                                        "function": {
+                                            "name": fn_d.get("name", ""),
+                                            "arguments": "",
+                                        },
+                                    }
+                                else:
+                                    if tc_delta.get("id"):
+                                        accumulated_tool_calls[idx]["id"] = tc_delta["id"]
+                                    if fn_d.get("name"):
+                                        acc_fn = accumulated_tool_calls[idx]["function"]
+                                        acc_fn["name"] = fn_d["name"]
+                                # Append argument chunks
+                                if fn_d.get("arguments"):
+                                    acc_fn = accumulated_tool_calls[idx]["function"]
+                                    acc_fn["arguments"] += fn_d["arguments"]
 
-                    # No tool calls — streaming done
-                    break
+                        # Yield text content
+                        content = delta.get("content", "")
+                        if content:
+                            yield content
+
+                # After stream ends: check if we got tool calls
+                if accumulated_tool_calls:
+                    tool_call_count += 1
+                    tool_calls_list = [
+                        accumulated_tool_calls[i]
+                        for i in sorted(accumulated_tool_calls)
+                    ]
+                    logger.info(
+                        "Groq stream tool call round #%d: %d tool(s)",
+                        tool_call_count, len(tool_calls_list),
+                    )
+
+                    # Add assistant message with tool_calls
+                    messages.append({
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": tool_calls_list,
+                    })
+
+                    # Execute tools and add results
+                    tool_results = await _execute_tool_calls(tool_calls_list)
+                    messages.extend(tool_results)
+                    # Continue loop → new stream with tool results
+                    continue
+
+                # No tool calls — streaming done
+                break
 
         except (RateLimitError, ProviderError, ProviderTimeoutError):
             raise

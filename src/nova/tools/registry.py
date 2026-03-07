@@ -12,8 +12,6 @@ from nova.memory.persistent import (
     memory_forget,
     memory_search,
     memory_store,
-    recall_facts,
-    remember_fact,
     update_user_profile,
 )
 from nova.tools import (
@@ -897,9 +895,6 @@ _TOOL_IMPLEMENTATIONS: dict[str, object] = {
     "memory_search": memory_search,
     "memory_forget": memory_forget,
     "update_user_profile": update_user_profile,
-    # Legacy aliases
-    "remember_fact": remember_fact,
-    "recall_facts": recall_facts,
     # System Info
     "get_battery_level": system_info.get_battery_level,
     "get_ram_usage": system_info.get_ram_usage,

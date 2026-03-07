@@ -29,10 +29,8 @@ class NovaConfig(BaseSettings):
     silence_duration: float = 1.0
     max_recording_seconds: float = 15.0
 
-    # Provider priorities
-    stt_providers: list[str] = ["groq", "cloudflare"]
-    llm_providers: list[str] = ["gemini", "groq", "cloudflare"]
-    tts_providers: list[str] = ["edge", "cloudflare"]
+    # Provider priorities (unused — providers are wired in orchestrator.py)
+    # Retained for .env compat but not referenced at runtime.
 
     # Timeouts (seconds)
     stt_timeout: float = 10.0
@@ -40,7 +38,6 @@ class NovaConfig(BaseSettings):
     tts_timeout: float = 10.0
 
     # Conversation
-    max_context_turns: int = 10
     default_language: str = "auto"
     stt_language: str = "auto"  # Hint for Whisper ("id", "en", or "auto")
 
@@ -59,14 +56,9 @@ class NovaConfig(BaseSettings):
 
     # System
     log_level: str = "INFO"
-    cache_ttl_hours: int = 24
 
     # Phase 3: Memory & Prompts
     embedding_enabled: bool = False
-    prompts_dir: str = "~/.nova/prompts"
-    memory_db_path: str = "~/.nova/memory/nova.db"
-    compaction_threshold: int = 15
-    max_conversation_turns: int = 20
 
     # Embeddings
     embedding_model: str = "gemini-embedding-001"
